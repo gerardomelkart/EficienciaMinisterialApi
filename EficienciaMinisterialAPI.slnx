@@ -1,4 +1,3 @@
 <Solution>
-  <Project Path="EficienciaMinisterialAPI.Verificacion/EficienciaMinisterialAPI.Verificacion.csproj" />
-  <Project Path="EficienciaMinisterialAPI/EficienciaMinisterialAPI.csproj" />
+    <Project Path="EficienciaMinisterialAPI/EficienciaMinisterialAPI.csproj" />
 </Solution>

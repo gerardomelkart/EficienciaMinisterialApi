@@ -56,14 +56,13 @@ Los perfiles se consultan en SQL en cada solicitud: un cambio de rol o desactiva
 
 La API no contiene cadenas de conexión reales, no accede a DBBridge ni modifica sus tablas. La integración utilizará las copias diarias de DBBridge, con conexión separada de solo lectura y corte registrado cuando se defina la regla operativa.
 
-## Verificación
+## Compilación
 
 ```powershell
-dotnet build EficienciaMinisterialAPI.slnx -c Release -warnaserror
-dotnet run --project EficienciaMinisterialAPI.Verificacion -c Release
+dotnet build EficienciaMinisterialAPI.slnx -c Release
 ```
 
-El proyecto de verificación prueba el lector Excel, permisos por institución/territorio y la plantilla con datos ficticios. No sustituye una prueba de integración con SQL Server. La primera entrega se compila con SDK .NET 10; los scripts pasaron análisis de sintaxis T-SQL 2019, pero las transacciones requieren validación en una instancia de pruebas antes del despliegue.
+La solución contiene únicamente el proyecto de la API. La primera entrega se compila con SDK .NET 10; los scripts pasaron análisis de sintaxis T-SQL 2019, pero el flujo completo requiere validación en una instancia SQL Server de pruebas antes del despliegue.
 
 ## Formato
 
