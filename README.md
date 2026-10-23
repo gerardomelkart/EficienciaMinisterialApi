@@ -2,13 +2,15 @@
 
 Primera entrega: API .NET 10 para autenticación, altas de usuarios y recepción de Excel de corporaciones. Conserva la separación de controladores, servicios y acceso SQL del SIIID. El cliente Angular está en `gerardomelkart/PrimerRespondienteFront` y los scripts SQL en `gerardomelkart/EficienciaMinisterialBD`.
 
+Consultar la [guía de entornos, conexión, usuario inicial y logs](docs/configuracion-entornos.md). Desarrollo utiliza SQL Server remoto con `EficienciaMinisterial_DEV`; producción tendrá una base independiente al publicar.
+
 ## Preparación local
 
 1. Instalar SDK .NET 10 y ejecutar los scripts `001_base.sql` y `002_catalogos.sql` del repositorio de BD.
 2. Desde `EficienciaMinisterialAPI`, configurar los secretos locales. No enviar ni guardar credenciales en Git:
 
 ```powershell
-dotnet user-secrets set "ConnectionStrings:EficienciaMinisterial" "Server=SERVIDOR,1433;Database=EficienciaMinisterial;User Id=USUARIO;Password=CONTRASEÑA;Encrypt=True;TrustServerCertificate=False"
+dotnet user-secrets set "ConnectionStrings:EficienciaMinisterial" "Server=SERVIDOR,1433;Database=EficienciaMinisterial_DEV;User Id=USUARIO;Password=CONTRASEÑA;Encrypt=True;TrustServerCertificate=False"
 dotnet user-secrets set "Jwt:Key" "CLAVE_ALEATORIA_DE_AL_MENOS_32_BYTES"
 ```
 

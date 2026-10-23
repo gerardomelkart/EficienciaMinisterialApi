@@ -11,7 +11,7 @@ using EficienciaMinisterialAPI.Services;
 namespace EficienciaMinisterialAPI.Controllers;
 [ApiController]
 [Route("api/auth")]
-public sealed class AuthController(UsuarioService usuarios, IConfiguration configuration) : ControllerBase
+public sealed class AuthController(UsuarioService usuarios, IConfiguration configuration, ILogger<AuthController> logger) : ControllerBase
 {
     [AllowAnonymous]
     [EnableRateLimiting("login")]
@@ -20,13 +20,16 @@ public sealed class AuthController(UsuarioService usuarios, IConfiguration confi
     {
         if(System.Text.Encoding.UTF8.GetByteCount(request.Password) > 72)
         {
+            logger.LogWarning("Intento de acceso rechazado. TraceId: {TraceId}", HttpContext.TraceIdentifier);
             return Unauthorized(new { mensaje = "Usuario o contraseña incorrectos." });
         }
         var usuario = await usuarios.AutenticarAsync(request);
         if(usuario == null)
         {
+            logger.LogWarning("Intento de acceso rechazado. TraceId: {TraceId}", HttpContext.TraceIdentifier);
             return Unauthorized(new { mensaje = "Usuario o contraseña incorrectos." });
         }
+        logger.LogInformation("Inicio de sesión correcto. UsuarioId: {UsuarioId}. TraceId: {TraceId}", usuario.Id, HttpContext.TraceIdentifier);
         var vence = DateTime.UtcNow.AddHours(1);
         var token = new JwtSecurityToken(
             issuer: configuration["Jwt:Issuer"], audience: configuration["Jwt:Audience"],
