@@ -7,11 +7,12 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using EficienciaMinisterialAPI.Models;
 using EficienciaMinisterialAPI.Services;
+using EficienciaMinisterialAPI.Repositories;
 
 namespace EficienciaMinisterialAPI.Controllers;
 [ApiController]
 [Route("api/auth")]
-public sealed class AuthController(UsuarioService usuarios, IConfiguration configuration, ILogger<AuthController> logger) : ControllerBase
+public sealed class AuthController(UsuarioService usuarios, IConfiguration configuration, ILogger<AuthController> logger, ConfiguracionRepository configuracion) : ControllerBase
 {
     [AllowAnonymous]
     [EnableRateLimiting("login")]
@@ -30,7 +31,7 @@ public sealed class AuthController(UsuarioService usuarios, IConfiguration confi
             return Unauthorized(new { mensaje = "Usuario o contraseña incorrectos." });
         }
         logger.LogInformation("Inicio de sesión correcto. UsuarioId: {UsuarioId}. TraceId: {TraceId}", usuario.Id, HttpContext.TraceIdentifier);
-        var vence = DateTime.UtcNow.AddHours(1);
+        var vence = DateTime.UtcNow.AddMinutes((await configuracion.ObtenerAsync()).Valor<int>("Seguridad.TokenMinutos"));
         var token = new JwtSecurityToken(
             issuer: configuration["Jwt:Issuer"], audience: configuration["Jwt:Audience"],
             claims: [new Claim(ClaimTypes.NameIdentifier, usuario.Id.ToString())],

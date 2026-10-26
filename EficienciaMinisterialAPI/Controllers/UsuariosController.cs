@@ -6,7 +6,8 @@ using EficienciaMinisterialAPI.Services;
 
 namespace EficienciaMinisterialAPI.Controllers;
 [ApiController]
-[Authorize(Roles = "SUPER_USUARIO")]
+[Authorize]
+[Permiso("usuarios")]
 [Route("api/usuarios")]
 public sealed class UsuariosController(UsuarioService usuarios) : ControllerBase
 {

@@ -5,7 +5,7 @@ public sealed record LoginRequest([Required, MaxLength(80)] string Usuario, [Req
 public sealed record CrearUsuarioRequest(
     [Required, MaxLength(80)] string Usuario,
     [Required, MaxLength(200)] string Nombre,
-    [Required, MinLength(12), MaxLength(72)] string Password,
+    [Required, MaxLength(72)] string Password,
     [Required] string Rol,
     string? Institucion,
     [Required] string Ambito,
