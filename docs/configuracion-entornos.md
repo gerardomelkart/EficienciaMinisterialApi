@@ -115,7 +115,3 @@ Logging__Directorio=/var/log/eficiencia-ministerial-api
 Los valores anteriores son marcadores de ejemplo. Completar únicamente en el servidor y asignar lectura al usuario que ejecuta el servicio. Verificar permisos SQL y de escritura en logs antes de iniciar. User Secrets no se copia al publicar: la configuración del servidor se conserva fuera de la publicación. La clave JWT de producción debe ser distinta de la de desarrollo.
 
 Para quien revise este repo público: no se requieren credenciales reales para compilar. Para probar el flujo completo, crear una base de pruebas propia, instalar los scripts y proporcionar sus secretos mediante estos mecanismos. No subir archivos `.env`, credenciales reales ni logs al repositorio.
-
-## Configuración desde base de datos
-
-Esta entrega requiere aplicar `003_configuracion.sql` del repositorio de BD antes de actualizar API y front. En una base existente no repetir la creación ni eliminar datos. Los catálogos, permisos y parámetros operativos se obtienen de SQL; ya no existen listas de instituciones, roles o ámbitos en el formulario. Ver `docs/configuracion.md` en EficienciaMinisterialBD para tablas, parámetros, permisos y orden de actualización. Conexión y claves permanecen en User Secrets o entorno.

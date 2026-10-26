@@ -2,36 +2,17 @@ using EficienciaMinisterialAPI.Repositories;
 using EficienciaMinisterialAPI.Models;
 
 namespace EficienciaMinisterialAPI.Services;
-public sealed class UsuarioService(UsuarioRepository repository, ConfiguracionRepository configuracion)
+public sealed class UsuarioService(UsuarioRepository repository)
 {
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> HashInexistentes = new();
-
-    public async Task<UsuarioInfo?> ObtenerAsync(int id)
-    {
-        var usuario = await repository.ObtenerAsync(id);
-        var config = await configuracion.ObtenerAsync();
-        if(usuario == null)
-        {
-            return null;
-        }
-        var rol = config.Roles.SingleOrDefault(r => r.Codigo == usuario.Rol);
-        var ambito = config.Ambitos.SingleOrDefault(a => a.Codigo == usuario.Ambito);
-        return rol != null && ambito != null
-            && config.RolesAmbitos.Any(a => a.Rol == usuario.Rol && a.Ambito == usuario.Ambito)
-            && (!ambito.RequiereEntidad || config.Entidades.Any(e => e.Id == usuario.Entidad && e.Asignable))
-            && (usuario.Institucion == null || config.Instituciones.Any(i => i.Codigo == usuario.Institucion))
-            && (rol.TipoInstitucion == null || config.Instituciones.Any(i => i.Codigo == usuario.Institucion && i.Tipo == rol.TipoInstitucion))
-            ? usuario : null;
-    }
+    public Task<UsuarioInfo?> ObtenerAsync(int id) => repository.ObtenerAsync(id);
 
     public Task<IEnumerable<UsuarioInfo>> ListarAsync() => repository.ListarAsync();
 
     public async Task<UsuarioInfo?> AutenticarAsync(LoginRequest request)
     {
         var usuario = await repository.ObtenerCredencialesAsync(request.Usuario.Trim());
-        // Mantener el trabajo BCrypt cuando la cuenta no existe, sin una contraseña de respaldo.
-        var costo = (await configuracion.ObtenerAsync()).Valor<int>("Seguridad.CostoHash");
-        var hash = usuario?.PasswordHash ?? HashInexistentes.GetOrAdd(costo, valor => BCrypt.Net.BCrypt.HashPassword(Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)), valor));
+        // Hash fijo de una contraseña aleatoria; también se verifica cuando la cuenta no existe.
+        var hash = usuario?.PasswordHash ?? "$2a$11$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
         if(!BCrypt.Net.BCrypt.Verify(request.Password, hash) || usuario == null)
         {
             return null;
@@ -42,20 +23,25 @@ public sealed class UsuarioService(UsuarioRepository repository, ConfiguracionRe
 
     public async Task<int> CrearAsync(CrearUsuarioRequest request, int? actor)
     {
-        var config = await configuracion.ObtenerAsync();
-        var rol = config.Roles.SingleOrDefault(r => r.Codigo == request.Rol);
-        var ambito = config.Ambitos.SingleOrDefault(a => a.Codigo == request.Ambito);
-        if(rol == null || ambito == null || !config.RolesAmbitos.Any(a => a.Rol == request.Rol && a.Ambito == request.Ambito)
+        string[] roles = ["SUPER_USUARIO", "PRIMER_RESPONDIENTE", "FISCALIA", "CONSULTA"];
+        string[] ambitos = ["NACIONAL", "ESTATAL", "FEDERAL"];
+        if(!roles.Contains(request.Rol) || !ambitos.Contains(request.Ambito)
             || string.IsNullOrWhiteSpace(request.Usuario) || string.IsNullOrWhiteSpace(request.Nombre)
-            || request.Password.Length < config.Valor<int>("Usuarios.PasswordMinimo")
             || System.Text.Encoding.UTF8.GetByteCount(request.Password) > 72
-            || (ambito.RequiereEntidad && !config.Entidades.Any(e => e.Id == request.Entidad && e.Asignable))
-            || (!ambito.RequiereEntidad && request.Entidad != null)
-            || (request.Institucion != null && !config.Instituciones.Any(i => i.Codigo == request.Institucion))
-            || (rol.TipoInstitucion != null && !config.Instituciones.Any(i => i.Codigo == request.Institucion && i.Tipo == rol.TipoInstitucion)))
+            || (request.Ambito == "ESTATAL" && request.Entidad == null)
+            || (request.Ambito != "ESTATAL" && request.Entidad != null)
+            || (request.Rol == "SUPER_USUARIO" && request.Ambito != "NACIONAL"))
         {
-            throw new ArgumentException("Los datos no corresponden al perfil, alcance o política de contraseña configurados.");
+            throw new ArgumentException("Perfil o alcance inválido. La contraseña admite hasta 72 bytes UTF-8.");
         }
-        return await repository.CrearAsync(request, BCrypt.Net.BCrypt.HashPassword(request.Password, config.Valor<int>("Seguridad.CostoHash")), actor);
+        if(request.Rol is "PRIMER_RESPONDIENTE" or "FISCALIA")
+        {
+            var tipo = request.Rol == "PRIMER_RESPONDIENTE" ? "CORPORACION" : "FISCALIA";
+            if(!await repository.InstitucionValidaAsync(request.Institucion, tipo))
+            {
+                throw new ArgumentException("La institución no corresponde al perfil.");
+            }
+        }
+        return await repository.CrearAsync(request, BCrypt.Net.BCrypt.HashPassword(request.Password, 12), actor);
     }
 }

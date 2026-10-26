@@ -10,41 +10,39 @@ using EficienciaMinisterialAPI.Repositories;
 
 namespace EficienciaMinisterialAPI.Controllers;
 [ApiController]
-[Authorize]
+[Authorize(Roles = "PRIMER_RESPONDIENTE,SUPER_USUARIO,CONSULTA")]
 [Route("api/primer-respondiente")]
-public sealed class CargasController(ExcelCargaService excel, CargaRepository cargas, ConfiguracionRepository configuracion) : ControllerBase
+public sealed class CargasController(ExcelCargaService excel, CargaRepository cargas) : ControllerBase
 {
     private UsuarioInfo Usuario => (UsuarioInfo)HttpContext.Items["Usuario"]!;
 
-    [Permiso("consultar_cargas")]
     [HttpGet("plantilla")]
-    public async Task<IActionResult> Plantilla()
+    public IActionResult Plantilla()
     {
-        var config = await configuracion.ObtenerAsync();
-        var campos = config.Campos;
         using var libro = new XLWorkbook();
         var hoja = libro.AddWorksheet("PLANTILLA");
-        for(var i = 0; i < campos.Count; i++)
+        for(var i = 0; i < ExcelCargaService.Encabezados.Length; i++)
         {
-            hoja.Cell(1, i + 1).Value = campos[i].Encabezado;
+            hoja.Cell(1, i + 1).Value = ExcelCargaService.Encabezados[i];
         }
-        hoja.Range(1, 1, 1, campos.Count).Style.Fill.BackgroundColor = XLColor.FromHtml("#691c32");
-        hoja.Range(1, 1, 1, campos.Count).Style.Font.FontColor = XLColor.White;
-        hoja.Range(1, 1, 1, campos.Count).Style.Font.Bold = true;
-        hoja.Range(1, 1, 1, campos.Count).Style.Alignment.WrapText = true;
+        hoja.Range("A1:G1").Style.Fill.BackgroundColor = XLColor.FromHtml("#691c32");
+        hoja.Range("A1:G1").Style.Font.FontColor = XLColor.White;
+        hoja.Range("A1:G1").Style.Font.Bold = true;
+        hoja.Range("A1:G1").Style.Alignment.WrapText = true;
         hoja.Row(1).Height = 45;
         hoja.Columns().Width = 28;
         hoja.Column(4).Width = 45;
         hoja.Column(5).Width = 40;
-        hoja.Column(campos.Single(c => c.Codigo == "FECHA_DETENCION").Posicion).Style.DateFormat.Format = "yyyy-mm-dd";
+        hoja.Column(3).Style.DateFormat.Format = "yyyy-mm-dd";
         hoja.SheetView.FreezeRows(1);
         var diccionario = libro.AddWorksheet("Diccionario");
         diccionario.Cell(1, 1).Value = "Campo";
         diccionario.Cell(1, 2).Value = "Regla de esta entrega";
-        for(var i = 0; i < campos.Count; i++)
+        string[] reglas = ["SEDENA, SEMAR, GN o SSPC. Debe corresponder al usuario.", "AA/FC/000/DDMMAAAA/0000 o AA/FF/000/DDMMAAAA/0000. Sin IA/AI.", "Fecha de Excel, no texto.", "Texto libre, máximo 500 caracteres.", "Texto libre, máximo 300 caracteres.", "Entidad del catálogo nacional.", "Fuero común o Fuero federal."];
+        for(var i = 0; i < reglas.Length; i++)
         {
-            diccionario.Cell(i + 2, 1).Value = campos[i].Encabezado;
-            diccionario.Cell(i + 2, 2).Value = campos[i].Regla;
+            diccionario.Cell(i + 2, 1).Value = ExcelCargaService.Encabezados[i];
+            diccionario.Cell(i + 2, 2).Value = reglas[i];
         }
         diccionario.Column(1).Width = 48;
         diccionario.Column(2).Width = 90;
@@ -54,19 +52,18 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         return File(memoria.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Plantilla_PrimerRespondiente.xlsx");
     }
 
-    [Permiso("cargar")]
+    [Authorize(Roles = "PRIMER_RESPONDIENTE")]
     [HttpPost("cargas/validar")]
-    [DisableRequestSizeLimit]
+    [RequestSizeLimit(12_000_000)]
     public async Task<IActionResult> Validar(IFormFile archivo, [FromForm] DateTime periodoInicio, [FromForm] DateTime periodoFin)
     {
-        var config = await configuracion.ObtenerAsync();
-        if(archivo.Length <= 0 || archivo.Length > config.Valor<long>("Carga.MaxBytes") || !Path.GetExtension(archivo.FileName).Equals(config.Valor<string>("Carga.Extension"), StringComparison.OrdinalIgnoreCase))
+        if(archivo.Length is <= 0 or > 10_000_000 || !Path.GetExtension(archivo.FileName).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
         {
-            return BadRequest(new { mensaje = $"Seleccione un archivo {config.Valor<string>("Carga.Extension")} de hasta {config.Valor<long>("Carga.MaxBytes")} bytes." });
+            return BadRequest(new { mensaje = "Seleccione un archivo .xlsx de hasta 10 MB." });
         }
-        if(periodoInicio.Year < config.Valor<int>("Carga.AnioMinimo") || periodoFin.Year > config.Valor<int>("Carga.AnioMaximo") || periodoFin.Date < periodoInicio.Date)
+        if(periodoInicio.Year < 2000 || periodoFin.Year > 2100 || periodoFin.Date < periodoInicio.Date)
         {
-            return BadRequest(new { mensaje = "Indique un periodo válido dentro de los años configurados." });
+            return BadRequest(new { mensaje = "Indique un periodo válido entre 2000 y 2100." });
         }
         using var memoria = new MemoryStream();
         await archivo.CopyToAsync(memoria);
@@ -74,7 +71,7 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         try
         {
             using var zip = new ZipArchive(new MemoryStream(bytes));
-            if(zip.Entries.Count > config.Valor<int>("Carga.MaxEntradasZip") || zip.Entries.Sum(e => e.Length) > config.Valor<long>("Carga.MaxDescomprimido"))
+            if(zip.Entries.Count > 2000 || zip.Entries.Sum(e => e.Length) > 100_000_000)
             {
                 return BadRequest(new { mensaje = "El contenido descomprimido supera el límite técnico." });
             }
@@ -105,7 +102,7 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         return Ok(new { valido = true, idCarga = id, totalRegistros = resultado.Registros.Count, errores = resultado.Errores, avisos = resultado.Avisos });
     }
 
-    [Permiso("cargar")]
+    [Authorize(Roles = "PRIMER_RESPONDIENTE")]
     [HttpPost("cargas/confirmar")]
     public async Task<IActionResult> Confirmar(ConfirmarCargaRequest request)
     {
@@ -113,11 +110,9 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         return carga == null ? NotFound() : Ok(carga);
     }
 
-    [Permiso("consultar_cargas")]
     [HttpGet("cargas")]
     public async Task<IActionResult> Listar() => Ok(await cargas.ListarAsync(Usuario));
 
-    [Permiso("consultar_cargas")]
     [HttpGet("cargas/{id:guid}")]
     public async Task<IActionResult> Detalle(Guid id)
     {
@@ -125,7 +120,6 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         return carga == null ? NotFound() : Ok(carga);
     }
 
-    [Permiso("consultar_cargas")]
     [HttpGet("cargas/{id:guid}/archivo")]
     public async Task<IActionResult> Archivo(Guid id)
     {
@@ -137,7 +131,6 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         return File((await cargas.ArchivoAsync(Usuario, id))!, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", carga.NombreArchivo);
     }
 
-    [Permiso("consultar_cargas")]
     [HttpGet("cargas/{id:guid}/acuse")]
     public async Task<IActionResult> Acuse(Guid id)
     {

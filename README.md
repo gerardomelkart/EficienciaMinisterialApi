@@ -69,7 +69,3 @@ La solución contiene únicamente el proyecto de la API. La primera entrega se c
 ## Formato
 
 Cuatro espacios, llaves en línea aparte, namespace de archivo y condiciones `if(...)`, conforme al fragmento proporcionado. `.editorconfig` y `.gitattributes` conservan sangría y CRLF. `.gitignore` excluye `.vs`, `bin`, `obj`, archivos de usuario, credenciales y logs. Se retiraron del seguimiento los archivos locales de Visual Studio y compilación del commit inicial.
-
-## Configuración desde base de datos
-
-Esta entrega requiere aplicar `003_configuracion.sql` del repositorio de BD antes de actualizar API y front. En una base existente no repetir la creación ni eliminar datos. Los catálogos, permisos y parámetros operativos se obtienen de SQL; ya no existen listas de instituciones, roles o ámbitos en el formulario. Ver `docs/configuracion.md` en EficienciaMinisterialBD para tablas, parámetros, permisos y orden de actualización. Conexión y claves permanecen en User Secrets o entorno.

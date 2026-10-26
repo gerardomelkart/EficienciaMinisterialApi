@@ -40,7 +40,7 @@ try
     builder.Services.AddScoped<SqlConnectionFactory>();
     builder.Services.AddScoped<UsuarioService>();
     builder.Services.AddScoped<UsuarioRepository>();
-    builder.Services.AddScoped<ConfiguracionRepository>();
+    builder.Services.AddScoped<CatalogoRepository>();
     builder.Services.AddScoped<ExcelCargaService>();
     builder.Services.AddScoped<CargaRepository>();
     if(args.Contains("--crear-superusuario"))
@@ -49,8 +49,7 @@ try
         using var scope = provisionamiento.Services.CreateScope();
         var nombre = Environment.GetEnvironmentVariable("EM_ADMIN_USUARIO") ?? throw new InvalidOperationException("Falta EM_ADMIN_USUARIO.");
         var password = Environment.GetEnvironmentVariable("EM_ADMIN_PASSWORD") ?? throw new InvalidOperationException("Falta EM_ADMIN_PASSWORD.");
-        var configInicial = await scope.ServiceProvider.GetRequiredService<ConfiguracionRepository>().ObtenerAsync();
-        var request = new CrearUsuarioRequest(nombre, nombre, password, configInicial.Valor<string>("Seguridad.RolInicial"), null, configInicial.Valor<string>("Seguridad.AmbitoInicial"), null);
+        var request = new CrearUsuarioRequest(nombre, nombre, password, "SUPER_USUARIO", null, "NACIONAL", null);
         System.ComponentModel.DataAnnotations.Validator.ValidateObject(request, new System.ComponentModel.DataAnnotations.ValidationContext(request), true);
         await scope.ServiceProvider.GetRequiredService<UsuarioService>().CrearAsync(request, null);
         Console.WriteLine("Superusuario creado.");
@@ -61,11 +60,6 @@ try
     {
         throw new InvalidOperationException("Configure Jwt__Key con al menos 32 bytes aleatorios fuera del repositorio.");
     }
-    var configArranque = await new ConfiguracionRepository(new SqlConnectionFactory(builder.Configuration)).ObtenerAsync();
-    builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
-    {
-        options.MultipartBodyLengthLimit = configArranque.Valor<long>("Carga.MaxBytes") + 1_000_000;
-    });
     builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
@@ -99,7 +93,7 @@ try
     builder.Services.AddRateLimiter(options =>
     {
         options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-        options.AddPolicy("login", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "local", _ => new FixedWindowRateLimiterOptions { PermitLimit = configArranque.Valor<int>("Seguridad.IntentosLogin"), Window = TimeSpan.FromSeconds(configArranque.Valor<int>("Seguridad.VentanaLoginSegundos")), QueueLimit = 0 }));
+        options.AddPolicy("login", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "local", _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     });
     var app = builder.Build();
     // Solo se aceptan encabezados de proxies de loopback (lista predeterminada del middleware).

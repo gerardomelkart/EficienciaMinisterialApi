@@ -6,8 +6,10 @@ using EficienciaMinisterialAPI.Repositories;
 using EficienciaMinisterialAPI.Models;
 
 namespace EficienciaMinisterialAPI.Services;
-public sealed class ExcelCargaService(ConfiguracionRepository configuracion)
+public sealed class ExcelCargaService(CatalogoRepository catalogos)
 {
+    public static readonly string[] Encabezados = ["CORPORACION", "FOLIO_RND", "FECHA_DETENCION", "AUTORIDAD_EN_DONDE_SE_HIZO_LA_PUESTA", "NOMBRE_DETENIDO", "ENTIDAD_DETENCION", "TIPO_FUERO"];
+
     public static string Normalizar(string valor)
     {
         var texto = valor.Trim().Normalize(NormalizationForm.FormD);
@@ -16,34 +18,24 @@ public sealed class ExcelCargaService(ConfiguracionRepository configuracion)
 
     public async Task<(List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos)> LeerAsync(byte[] archivo, UsuarioInfo usuario)
     {
-        var config = await configuracion.ObtenerAsync();
-        var campos = config.Campos;
-        var encabezados = campos.Select(c => c.Encabezado).ToArray();
-        int Columna(string codigo) => campos.Single(c => c.Codigo == codigo).Posicion;
-        var entidades = config.Entidades.ToDictionary(e => Normalizar(e.Nombre), e => e.Id);
-        foreach(var alias in config.Alias.Where(a => a.Tipo == "ENTIDAD"))
+        var catalogo = await catalogos.ObtenerEntidadesAsync();
+        var entidades = catalogo.ToDictionary(e => Normalizar(e.Key), e => e.Value);
+        return Leer(archivo, usuario, entidades);
+    }
+
+    public static (List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos) Leer(byte[] archivo, UsuarioInfo usuario, Dictionary<string, byte> catalogo)
+    {
+        var entidades = new Dictionary<string, byte>(catalogo);
+        foreach(var alias in new[] { ("ESTADO DE MEXICO", "MEXICO"), ("COAHUILA", "COAHUILA DE ZARAGOZA"), ("MICHOACAN", "MICHOACAN DE OCAMPO"), ("VERACRUZ", "VERACRUZ DE IGNACIO DE LA LLAVE"), ("DISTRITO FEDERAL", "CIUDAD DE MEXICO") })
         {
-            if(byte.TryParse(alias.Codigo, out var id) && config.Entidades.Any(e => e.Id == id))
+            if(entidades.TryGetValue(alias.Item2, out var id))
             {
-                entidades[Normalizar(alias.Nombre)] = id;
+                entidades[alias.Item1] = id;
             }
         }
-        var instituciones = config.Instituciones.ToDictionary(i => Normalizar(i.Codigo), i => i.Codigo);
-        foreach(var institucion in config.Instituciones)
-        {
-            instituciones[Normalizar(institucion.Nombre)] = institucion.Codigo;
-        }
-        foreach(var alias in config.Alias.Where(a => a.Tipo == "INSTITUCION"))
-        {
-            if(config.Instituciones.Any(i => i.Codigo == alias.Codigo))
-            {
-                instituciones[Normalizar(alias.Nombre)] = alias.Codigo;
-            }
-        }
-        var ambito = config.Ambitos.Single(a => a.Codigo == usuario.Ambito);
         using var stream = new MemoryStream(archivo);
         using var libro = new XLWorkbook(stream);
-        var hoja = libro.Worksheets.FirstOrDefault(h => h.Cell(1, campos[0].Posicion).GetString().Trim() == encabezados[0]);
+        var hoja = libro.Worksheets.FirstOrDefault(h => h.Cell(1, 1).GetString().Trim() == "CORPORACION");
         List<RegistroCarga> registros = [];
         List<ErrorFila> errores = [];
         List<string> avisos = [];
@@ -52,11 +44,11 @@ public sealed class ExcelCargaService(ConfiguracionRepository configuracion)
             errores.Add(new(1, "ESTRUCTURA", "No se encontró una hoja con los encabezados de la plantilla."));
             return (registros, errores, avisos);
         }
-        for(var columna = 1; columna <= encabezados.Length; columna++)
+        for(var columna = 1; columna <= Encabezados.Length; columna++)
         {
-            if(hoja.Cell(1, columna).GetString().Trim() != encabezados[columna - 1])
+            if(hoja.Cell(1, columna).GetString().Trim() != Encabezados[columna - 1])
             {
-                errores.Add(new(1, encabezados[columna - 1], $"Encabezado incorrecto en columna {columna}."));
+                errores.Add(new(1, Encabezados[columna - 1], $"Encabezado incorrecto en columna {columna}."));
             }
         }
         if(errores.Count > 0)
@@ -64,87 +56,90 @@ public sealed class ExcelCargaService(ConfiguracionRepository configuracion)
             return (registros, errores, avisos);
         }
         var ultima = hoja.LastRowUsed()?.RowNumber() ?? 1;
-        if(ultima > config.Valor<int>("Carga.MaxFilas") + 1)
+        if(ultima > 20001)
         {
-            errores.Add(new(0, "ARCHIVO", $"Máximo de {config.Valor<int>("Carga.MaxFilas")} filas por archivo."));
+            errores.Add(new(0, "ARCHIVO", "Máximo técnico de 20,000 filas por archivo."));
             return (registros, errores, avisos);
         }
         var folios = new HashSet<string>();
         for(var fila = 2; fila <= ultima; fila++)
         {
-            if(Enumerable.Range(1, campos.Count).All(c => hoja.Cell(fila, c).IsEmpty()))
+            if(Enumerable.Range(1, 7).All(c => hoja.Cell(fila, c).IsEmpty()))
             {
                 continue;
             }
             var anteriores = errores.Count;
-            var valores = Enumerable.Range(1, campos.Count).Select(c => hoja.Cell(fila, c).GetString().Trim()).ToArray();
-            for(var i = 0; i < campos.Count; i++)
+            var valores = Enumerable.Range(1, 7).Select(c => hoja.Cell(fila, c).GetString().Trim()).ToArray();
+            for(var i = 0; i < 7; i++)
             {
-                if(!config.Valor<bool>("Carga.PermitirFormulas") && hoja.Cell(fila, i + 1).HasFormula)
+                if(hoja.Cell(fila, i + 1).HasFormula)
                 {
-                    errores.Add(new(fila, encabezados[i], "Use valores, no fórmulas."));
+                    errores.Add(new(fila, Encabezados[i], "Use valores, no fórmulas."));
                 }
-                if(campos[i].Requerido && string.IsNullOrWhiteSpace(valores[i]))
+                if(string.IsNullOrWhiteSpace(valores[i]))
                 {
-                    errores.Add(new(fila, encabezados[i], "Campo requerido por la configuración vigente."));
+                    errores.Add(new(fila, Encabezados[i], "Campo requerido en esta versión inicial."));
                 }
             }
-            string Valor(string codigo) => valores[Columna(codigo) - 1];
-            var corporacion = instituciones.GetValueOrDefault(Normalizar(Valor("CORPORACION")), "");
+            var corporacion = Normalizar(valores[0]) switch
+            {
+                "MARINA" or "SECRETARIA DE MARINA" => "SEMAR",
+                "GUARDIA NACIONAL" => "GN",
+                "SECRETARIA DE LA DEFENSA NACIONAL" => "SEDENA",
+                "SECRETARIA DE SEGURIDAD Y PROTECCION CIUDADANA" => "SSPC",
+                var codigo => codigo
+            };
             if(corporacion != usuario.Institucion)
             {
                 errores.Add(new(fila, "CORPORACION", "La corporación debe corresponder a la institución del usuario."));
             }
-            var folio = Normalizar(Valor("FOLIO_RND"));
+            var folio = Normalizar(valores[1]);
             var partes = folio.Split('/');
-            if(!Regex.IsMatch(folio, config.Valor<string>("Carga.PatronFolio"), RegexOptions.None, TimeSpan.FromSeconds(1))
+            if(!Regex.IsMatch(folio, @"^[A-Z]{2}/(FC|FF)/[0-9]{3}/[0-9]{8}/[0-9]{4}$")
                 || partes.Length != 5
-                || !DateTime.TryParseExact(partes.ElementAtOrDefault(3), config.Valor<string>("Carga.FormatoFechaFolio"), CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+                || !DateTime.TryParseExact(partes.ElementAtOrDefault(3), "ddMMyyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
             {
-                errores.Add(new(fila, "FOLIO_RND", "Folio inválido según el formato configurado."));
+                errores.Add(new(fila, "FOLIO_RND", "Folio inválido. Use AA/FC/000/DDMMAAAA/0000 o AA/FF/000/DDMMAAAA/0000. No se admiten IA/AI."));
             }
-            if(!folios.Add(folio) && config.Valor<bool>("Carga.AvisarDuplicados"))
+            if(!folios.Add(folio))
             {
                 avisos.Add($"Fila {fila}: folio repetido dentro del archivo; pendiente definir su tratamiento operativo.");
             }
-            var celdaFecha = hoja.Cell(fila, Columna("FECHA_DETENCION"));
+            var celdaFecha = hoja.Cell(fila, 3);
             var fechaValida = celdaFecha.TryGetValue<DateTime>(out var fecha) && celdaFecha.DataType != XLDataType.Text;
             if(!fechaValida)
             {
                 errores.Add(new(fila, "FECHA_DETENCION", "Debe ser una fecha de Excel, no texto."));
             }
-            var entidadValida = entidades.TryGetValue(Normalizar(Valor("ENTIDAD_DETENCION")), out var entidad);
+            var entidadValida = entidades.TryGetValue(Normalizar(valores[5]), out var entidad);
             if(!entidadValida)
             {
                 errores.Add(new(fila, "ENTIDAD_DETENCION", "Entidad no reconocida."));
             }
-            if(ambito.RequiereEntidad && entidad != usuario.Entidad)
+            if(usuario.Ambito == "ESTATAL" && entidad != usuario.Entidad)
             {
                 errores.Add(new(fila, "ENTIDAD_DETENCION", "La entidad queda fuera del alcance del usuario."));
             }
-            var fuero = config.Fueros.FirstOrDefault(f => Normalizar(f.Nombre) == Normalizar(Valor("TIPO_FUERO")))?.Codigo ?? "";
-            if(fuero.Length == 0 || (ambito.Fuero != null && fuero != ambito.Fuero))
+            var fuero = Normalizar(valores[6]) switch { "FUERO COMUN" => "FC", "FUERO FEDERAL" => "FF", _ => "" };
+            if(fuero.Length == 0 || (usuario.Ambito == "FEDERAL" && fuero != "FF"))
             {
-                errores.Add(new(fila, "TIPO_FUERO", "Seleccione un fuero del catálogo dentro del alcance del usuario."));
+                errores.Add(new(fila, "TIPO_FUERO", "Use Fuero común o Fuero federal dentro del alcance del usuario."));
             }
-            if(config.Valor<bool>("Carga.AvisarDiferencias") && partes.Length == 5 && fuero.Length > 0 && partes[1] != fuero)
+            if(partes.Length == 5 && fuero.Length > 0 && partes[1] != fuero)
             {
                 avisos.Add($"Fila {fila}: el fuero del folio difiere del fuero reportado; requiere revisión.");
             }
-            if(config.Valor<bool>("Carga.AvisarDiferencias") && fechaValida && partes.Length == 5 && DateTime.TryParseExact(partes[3], config.Valor<string>("Carga.FormatoFechaFolio"), CultureInfo.InvariantCulture, DateTimeStyles.None, out var fechaFolio) && fechaFolio.Date != fecha.Date)
+            if(fechaValida && partes.Length == 5 && DateTime.TryParseExact(partes[3], "ddMMyyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var fechaFolio) && fechaFolio.Date != fecha.Date)
             {
                 avisos.Add($"Fila {fila}: la fecha del folio difiere de la fecha reportada; se conservan los datos originales.");
             }
-            foreach(var campo in campos.Where(c => c.MaxLongitud != null))
+            if(valores[3].Length > 500 || valores[4].Length > 300)
             {
-                if(Valor(campo.Codigo).Length > campo.MaxLongitud)
-                {
-                    errores.Add(new(fila, campo.Encabezado, $"Máximo {campo.MaxLongitud} caracteres."));
-                }
+                errores.Add(new(fila, "LONGITUD", "Autoridad: máximo 500 caracteres. Nombre: máximo 300."));
             }
             if(errores.Count == anteriores)
             {
-                registros.Add(new(fila, corporacion, folio, fecha.Date, Valor("AUTORIDAD_EN_DONDE_SE_HIZO_LA_PUESTA"), Valor("NOMBRE_DETENIDO"), entidad, fuero));
+                registros.Add(new(fila, corporacion, folio, fecha.Date, valores[3], valores[4], entidad, fuero));
             }
         }
         if(registros.Count == 0 && errores.Count == 0)
