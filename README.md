@@ -1,8 +1,52 @@
 # Eficiencia Ministerial API
 
-Primera entrega: API .NET 10 para autenticación, altas de usuarios y recepción de Excel de corporaciones. Conserva la separación de controladores, servicios y acceso SQL del SIIID. El cliente Angular está en `gerardomelkart/PrimerRespondienteFront` y los scripts SQL en `gerardomelkart/EficienciaMinisterialBD`.
+API central del proyecto, desarrollada en C# con .NET 10. Este repositorio contiene los controladores, servicios, acceso SQL y configuración de autenticación y logs de la primera etapa.
 
-Consultar la [guía de entornos, conexión, usuario inicial y logs](docs/configuracion-entornos.md). Desarrollo utiliza SQL Server remoto con `EficienciaMinisterial_DEV`; producción tendrá una base independiente al publicar.
+## Proyecto Eficiencia Ministerial
+
+Eficiencia Ministerial es una plataforma en desarrollo para recibir información de detenciones y, en una etapa posterior, incorporar el seguimiento ministerial de las fiscalías. Su arquitectura contempla una API central y una base propia, con **Primer Respondiente** como primera interfaz de captura.
+
+Esta versión reúne la base técnica y el diseño inicial. Las reglas operativas definitivas están pendientes de respuesta del área responsable; las funcionalidades provisionales no deben interpretarse como un proceso productivo terminado.
+
+## Repositorios relacionados
+
+| Repositorio | Responsabilidad | Tecnología |
+| --- | --- | --- |
+| [PrimerRespondienteFront](https://github.com/gerardomelkart/PrimerRespondienteFront) | Interfaz de acceso, captura por Excel, navegación e informes provisionales. | Angular, TypeScript, Bootstrap |
+| [EficienciaMinisterialApi](https://github.com/gerardomelkart/EficienciaMinisterialApi) | Autenticación, autorización, validaciones, recepción de archivos y acceso a datos. | C#, ASP.NET Core, .NET 10 |
+| [EficienciaMinisterialBD](https://github.com/gerardomelkart/EficienciaMinisterialBD) | Esquemas, tablas, catálogos, índices y secuencia de folios. | SQL Server 2019 o superior |
+
+El navegador se comunica por HTTP con la API; la API consulta y persiste en SQL Server. **El front no se conecta directamente a la base.** Para ejecutar el sistema completo se requieren los tres repositorios.
+
+## Flujo y alcance
+
+El flujo implementado para las corporaciones permite descargar una plantilla, cargar un Excel, revisar errores y observaciones y confirmar una entrega para obtener un folio y un acuse HTML imprimible. El archivo original se conserva junto con los registros aceptados.
+
+El flujo previsto para fiscalías consiste en descargar una plantilla con información de referencia y completar los campos de seguimiento ministerial. Esa segunda etapa todavía no está implementada.
+
+- **Disponible:** autenticación JWT, perfiles iniciales, alta y listado de usuarios, carga y validación de Excel, confirmación con folio, acuse y registros de operación.
+- **Provisional:** pantallas de informes “Reporte primer respondiente” y “Reporte completo”, sin consultas ni indicadores definitivos.
+- **Pendiente:** catálogos y reglas definitivas, fiscalías estatales, plantilla de seguimiento, cruces automáticos, edición/baja de usuarios y reportes operativos.
+
+Las futuras conexiones con SIIID e Ingesta de Datos no están implementadas. El cruce con RND/RND_FA, a partir de las copias generadas por DBBridge, también está pendiente. No existe actualmente un integrador entre estos sistemas.
+
+## Puesta en marcha del conjunto
+
+1. Preparar una instancia SQL Server de pruebas y ejecutar los scripts del repositorio de BD.
+2. Configurar la conexión y la clave JWT fuera del código, crear el superusuario e iniciar la API.
+3. Instalar las dependencias del front e iniciar Angular con su proxy local.
+
+Cada repositorio detalla sus pasos más abajo. No se incluyen credenciales predeterminadas ni datos personales de ejemplo; las demostraciones deben utilizar datos ficticios.
+
+## Contenido de este repositorio
+
+- `EficienciaMinisterialAPI/Controllers`: endpoints de autenticación, usuarios y cargas.
+- `EficienciaMinisterialAPI/Services`: autenticación y lectura/validación de Excel.
+- `EficienciaMinisterialAPI/Repositories`: consultas y persistencia SQL con Dapper.
+- `EficienciaMinisterialAPI/Data`: creación de conexiones SQL.
+- `docs/configuracion-entornos.md`: guía de conexión, JWT, usuario inicial y logs.
+
+Consultar la [guía de entornos, conexión, usuario inicial y logs](docs/configuracion-entornos.md). Desarrollo utiliza `EficienciaMinisterial_DEV`; producción tendrá una base independiente al publicarse.
 
 ## Preparación local
 
