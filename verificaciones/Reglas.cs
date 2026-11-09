@@ -18,7 +18,6 @@ var catalogo = new CatalogoCaptura
     Corporaciones = new() { ["SEDENA"] = "SEDENA", ["DEFENSA"] = "SEDENA", ["SEMAR"] = "SEMAR" },
     Fueros = new() { ["FC"] = "FC", ["Fuero común"] = "FC", ["FF"] = "FF", ["Fuero federal"] = "FF" }
 };
-var periodo = new PeriodoInfo { Inicio = new DateTime(2026, 10, 1), Fin = new DateTime(2026, 10, 15) };
 var perfiles = new List<PerfilInfo>
 {
     new() { Codigo = "SUPER_USUARIO" },
@@ -31,7 +30,7 @@ var ambitos = new List<AmbitoInfo>
 };
 (List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos) Leer(byte[] bytes, UsuarioInfo cuenta, CatalogoCaptura opciones)
 {
-    return ExcelCargaService.Leer(bytes, cuenta, opciones, 20000, periodo);
+    return ExcelCargaService.Leer(bytes, cuenta, opciones, 20000);
 }
 byte[] CambiarCelda(byte[] bytes, int fila, int columna, string valor)
 {
@@ -119,35 +118,18 @@ Probar("Fuero debe estar en el catálogo recibido", () =>
 });
 Probar("Límite de filas configurado", () =>
 {
-    Ver(ExcelCargaService.Leer(Libro("", "Persona de prueba", dos: true), usuario, catalogo, 1, periodo).Errores.Any(e => e.Campo == "ARCHIVO"), "Se ignoró el límite configurado");
+    Ver(ExcelCargaService.Leer(Libro("", "Persona de prueba", dos: true), usuario, catalogo, 1).Errores.Any(e => e.Campo == "ARCHIVO"), "Se ignoró el límite configurado");
 });
 Probar("Etiqueta del periodo usa sus fechas reales", () =>
 {
     Ver(new PeriodoInfo { Inicio = new DateTime(2084, 2, 16), Fin = new DateTime(2084, 2, 29) }.Nombre == "Segunda quincena de febrero 2084", "El periodo depende de una lista fija");
 });
-foreach(var fecha in new[] { new DateTime(2026, 10, 1), new DateTime(2026, 10, 15, 23, 59, 59) })
+foreach(var fecha in new[] { new DateTime(2026, 9, 30), new DateTime(2025, 6, 1), new DateTime(2026, 10, 1), new DateTime(2026, 10, 15) })
 {
-    Probar("Fecha dentro del periodo: " + fecha, () => Ver(Leer(Libro("", "Persona de prueba", fecha: fecha), usuario, catalogo).Errores.Count == 0, "Se rechazó un límite incluido"));
-}
-foreach(var fecha in new[] { new DateTime(2026, 9, 30), new DateTime(2026, 10, 16), new DateTime(2025, 10, 5) })
-{
-    Probar("Fecha fuera del periodo: " + fecha, () => Ver(Leer(Libro("", "Persona de prueba", fecha: fecha), usuario, catalogo).Errores.Any(e => e.Fila == 2 && e.Campo == "FECHA_DETENCION"), "Se aceptó una fecha fuera del periodo"));
-}
-foreach(var rango in new[]
-{
-    new PeriodoInfo { Inicio = new DateTime(2024, 2, 16), Fin = new DateTime(2024, 2, 29) },
-    new PeriodoInfo { Inicio = new DateTime(2026, 12, 16), Fin = new DateTime(2026, 12, 31) }
-})
-{
-    foreach(var fecha in new[] { rango.Inicio, rango.Fin, rango.Inicio.AddDays(-1), rango.Fin.AddDays(1) })
+    Probar("El periodo de entrega permite fechas anteriores: " + fecha.ToString("yyyy-MM-dd"), () =>
     {
-        Probar($"Rango variable {rango.Nombre}: {fecha:yyyy-MM-dd}", () =>
-        {
-            var resultado = ExcelCargaService.Leer(Libro("", "Persona de prueba", fecha: fecha), usuario, catalogo, 20000, rango);
-            var dentro = fecha >= rango.Inicio && fecha <= rango.Fin;
-            Ver(dentro ? resultado.Registros.Count == 1 && resultado.Errores.Count == 0
-                : resultado.Registros.Count == 0 && resultado.Errores.Any(e => e.Campo == "FECHA_DETENCION"), "No se aplicaron los límites del periodo recibido");
-        });
-    }
+        var resultado = Leer(Libro("", "Persona de prueba", fecha: fecha), usuario, catalogo);
+        Ver(resultado.Errores.Count == 0 && resultado.Registros.Count == 1, "Se rechazó una fecha anterior permitida por el cuestionario");
+    });
 }
 Environment.ExitCode = fallos == 0 ? 0 : 1;

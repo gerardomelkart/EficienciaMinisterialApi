@@ -6,10 +6,10 @@
 - Acceso estatal: todas las filas deben pertenecer a su entidad. La API valida cada fila y cualquier error impide aceptar el archivo completo (pregunta 11 y aclaración de alcance 49–54).
 - Excepción confirmada en el chat: solo el superusuario tiene selector de corporación, obtenido del catálogo de BD. Las filas del Excel deben coincidir con la selección.
 - Periodicidad: se elige una quincena del catálogo; no se recibe un intervalo libre (pregunta 1).
-- Cambio acordado el 9 de noviembre de 2026: las fechas de detención deben pertenecer a la quincena seleccionada, sin tolerancia de días. Esta decisión sustituye la respuesta anterior de la pregunta 2, que permitía fechas anteriores al periodo.
+- Periodo de entrega y fecha de detención son distintos. Se conservan las detenciones anteriores al periodo elegido (pregunta 2). El cuestionario es la referencia funcional y no se sustituye por una interpretación de una petición de interfaz.
 - El inicio histórico de junio de 2025 es un dato de instalación en SQL, tomado de la pregunta 5; no está duplicado en el front ni en C#.
 
-La solicitud inicial de tomar siempre la corporación del Excel fue precisada por el usuario: se toma del acceso, con selector exclusivo del superusuario. La implementación sigue esa última aclaración. Fuera del cambio de fechas documentado arriba, no se identificó otra contradicción en estas correcciones.
+La solicitud inicial de tomar siempre la corporación del Excel fue precisada por el usuario: se toma del acceso, con selector exclusivo del superusuario. La implementación sigue esa última aclaración. No se identificó otra contradicción en estas correcciones.
 
 ## Datos que ahora se consultan
 
@@ -62,20 +62,16 @@ No se han ejecutado migraciones ni probado persistencia contra el servidor SQL r
 
 Revisión independiente final: sin hallazgos críticos o importantes verificables en los cambios de los tres repositorios. Se mantiene pendiente la comprobación contra SQL Server real.
 
-## Selección por año y mes y validación estricta (2026-11-09)
+## Selección por año y mes (2026-11-09)
 
-Diseño: conservar la entrega quincenal y dividir el selector extenso en año, mes y quincena. Se eligió filtrar los periodos existentes de SQL, en lugar de generar calendarios o listas de años en Angular. Al cambiar año o mes se descarta la selección dependiente y cualquier validación anterior.
+La selección de entrega se divide en año, mes y quincena, filtrando los periodos habilitados que existen en SQL. No hay años ni meses fijos en Angular. Cambiar año o mes descarta la selección dependiente y cualquier validación anterior.
 
 La bienvenida presenta una cabecera institucional, el acceso activo y acciones según perfil, sin métricas ficticias. Mantiene la navegación superior y los colores actuales.
 
-Implementación y comprobaciones:
+### Corrección para respetar el cuestionario
 
-- [x] Sustituir el selector extenso por filtros dependientes en CargaPage; enviar el mismo idPeriodo.
-- [x] Consultar el periodo habilitado antes de leer el Excel y validar cada FECHA_DETENCION, con límites incluidos.
-- [x] Revalidar las fechas dentro de la transacción al guardar y al confirmar. Los borradores de versiones anteriores con fechas fuera de rango deben validarse de nuevo. Las entregas ya confirmadas no se modifican.
-- [x] Actualizar el diccionario de la plantilla y los README.
-- [x] Compilar front y API, ejecutar verificaciones de reglas y comprobar bienvenida y selección en navegador.
+La pregunta 2 permite fechas de detención anteriores al periodo de entrega. Se retiró la restricción añadida que obligaba a que cada fecha estuviera dentro de la quincena, tanto en la lectura del Excel como al guardar y confirmar. Se restauraron el diccionario de la plantilla y la nota de la pantalla. No se modifican la bienvenida ni los filtros de año, mes y quincena.
 
-No requiere una migración nueva. Sigue siendo necesario tener aplicada la migración 005 de periodos y catálogos de captura.
+El periodo sigue debiendo estar habilitado al guardar y confirmar. Se conservan las validaciones de estructura, fecha real de Excel, corporación y alcance territorial. Se agregaron pruebas de regresión para fechas anteriores al periodo de entrega.
 
-Validación de esta entrega: 34 comprobaciones de reglas con Excel reales generados en memoria, incluidas fechas límite, fuera de rango, año distinto, febrero bisiesto y cambio de año; compilación Release de API sin advertencias ni errores; compilación Angular; análisis sintáctico de las consultas nuevas con ScriptDom; navegador en 1440, 768, 390 y 320 píxeles, con HTTP simulado, para selección de periodo, reinicio de filtros y validación anterior, estado del archivo y permisos de interfaz. Revisión de código sin hallazgos críticos o importantes. No se ejecutaron las consultas contra la base real.
+No requiere una migración nueva. Sigue siendo necesario tener aplicada la migración 005 de periodos y catálogos de captura. Las pruebas locales no ejecutan consultas contra la base real.

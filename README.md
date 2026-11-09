@@ -101,7 +101,7 @@ Las altas aceptan `accesos: [{ rol, institucion, ambito, entidad }]`; por compat
 - Corporación, fecha y entidad obligatorias. Al menos folio RND o nombre. Autoridad y fuero opcionales.
 - Los límites técnicos se configuran en la sección Carga y se entregan al front; fechas de Excel y sin fórmulas. Cualquier error impide aceptar el archivo completo.
 - Se rechazan IA/AI. Una nomenclatura incorrecta genera observación para búsqueda posterior por nombre; no acredita un cruce exitoso.
-- Se normalizan acentos, espacios y mayúsculas para comparar. Se reconocen CDMX/Ciudad de México y México/Estado de México. Todas las fechas de detención deben estar dentro de la quincena seleccionada, incluyendo ambos límites. No se permite tolerancia de días; una fecha fuera del periodo impide aceptar el archivo completo.
+- Se normalizan acentos, espacios y mayúsculas para comparar. Se reconocen CDMX/Ciudad de México y México/Estado de México. El periodo corresponde a la entrega; las fechas de detención pueden ser anteriores, conforme a la pregunta 2 del cuestionario.
 - Las filas con folio repetido se conservan. La bandera consolidada de duplicados entre cargas y resultados RND se implementará con el cruce.
 - Los cinco catálogos ministeriales del área, incluido MASC agregado a conclusiones, quedan disponibles en SQL mediante el script 004. El script 005 agrega perfiles, ámbitos, equivalencias y periodos quincenales. Todavía no se implementa la carga de respuestas de fiscalías.
 - Pendientes de implementación: RND, quincenas/cierres y reemplazos, entregas en ceros, rechazo de detenciones reportadas en periodos anteriores, plantilla verde y reportes reales. La recepción actual conserva estado de cruce PENDIENTE y no habilita envío a fiscalías.

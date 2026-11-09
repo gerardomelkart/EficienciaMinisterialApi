@@ -47,12 +47,6 @@ public sealed class CatalogoRepository(SqlConnectionFactory factory)
         };
     }
 
-    public async Task<PeriodoInfo?> ObtenerPeriodoAsync(int id)
-    {
-        await using var db = await factory.AbrirAsync();
-        return await db.QuerySingleOrDefaultAsync<PeriodoInfo>("SELECT id, inicio, fin FROM primer_respondiente.periodo WHERE id = @id AND habilitado = 1 AND cerrado = 0", new { id });
-    }
-
     public async Task<IEnumerable<PeriodoInfo>> ObtenerPeriodosAsync()
     {
         await using var db = await factory.AbrirAsync();

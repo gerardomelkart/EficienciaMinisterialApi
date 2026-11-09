@@ -20,10 +20,6 @@ public sealed class CargaRepository(SqlConnectionFactory factory)
         {
             throw new ArgumentException("El periodo no existe, está deshabilitado o ya fue cerrado. Actualice la lista.");
         }
-        if(registros.Any(r => r.FechaDetencion.Date < periodo.Inicio.Date || r.FechaDetencion.Date > periodo.Fin.Date))
-        {
-            throw new ArgumentException("Las fechas de detención deben estar dentro del periodo seleccionado. Vuelva a validar el archivo.");
-        }
         var id = Guid.NewGuid();
         await db.ExecuteAsync("""
             INSERT primer_respondiente.carga(id, id_usuario, institucion, nombre_archivo, archivo, sha256, id_periodo, periodo_inicio, periodo_fin, estado, total_registros)
@@ -91,16 +87,6 @@ public sealed class CargaRepository(SqlConnectionFactory factory)
             if(!habilitado)
             {
                 throw new ArgumentException("El periodo no está habilitado. Vuelva a validar el archivo con un periodo disponible.");
-            }
-            var fechasFuera = await db.ExecuteScalarAsync<int>("""
-                SELECT COUNT(*) FROM primer_respondiente.registro r
-                JOIN primer_respondiente.carga c ON c.id = r.id_carga
-                JOIN primer_respondiente.periodo p ON p.id = c.id_periodo
-                WHERE c.id = @id AND (r.fecha_detencion < p.inicio OR r.fecha_detencion > p.fin)
-                """, new { id }, tx);
-            if(fechasFuera > 0)
-            {
-                throw new ArgumentException("La carga contiene fechas fuera del periodo. Vuelva a validar el archivo.");
             }
             await db.ExecuteAsync("""
                 UPDATE primer_respondiente.carga SET estado = 'CONFIRMADA', confirmado_utc = SYSUTCDATETIME(),
