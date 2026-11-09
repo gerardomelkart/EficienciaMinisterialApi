@@ -76,3 +76,6 @@ public sealed class CargaInfo
     public DateTime CreadoUtc { get; set; }
     public DateTime? ConfirmadoUtc { get; set; }
 }
+
+public sealed record IncidenciaValidacion(string Tipo, int? Fila, string Campo, string Mensaje);
+public sealed record ExportarValidacionRequest(List<IncidenciaValidacion> Filas);

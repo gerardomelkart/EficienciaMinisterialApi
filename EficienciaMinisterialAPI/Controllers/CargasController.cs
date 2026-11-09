@@ -74,6 +74,17 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
     }
 
     [Authorize(Roles = "PRIMER_RESPONDIENTE,SUPER_USUARIO")]
+    [HttpPost("cargas/validacion/excel")]
+    public IActionResult ExportarValidacion(ExportarValidacionRequest request)
+    {
+        if(request.Filas == null || request.Filas.Count == 0 || request.Filas.Count >= XLHelper.MaxRowNumber || request.Filas.Any(f => f == null))
+        {
+            return BadRequest(new { mensaje = "No hay resultados para exportar o exceden la capacidad de una hoja de Excel." });
+        }
+        return File(ExcelCargaService.ExportarResultados(request.Filas), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Resultado_validacion.xlsx");
+    }
+
+    [Authorize(Roles = "PRIMER_RESPONDIENTE,SUPER_USUARIO")]
     [HttpPost("cargas/validar")]
     public async Task<IActionResult> Validar(IFormFile archivo, [FromForm] int idPeriodo, [FromForm] string? institucion = null)
     {

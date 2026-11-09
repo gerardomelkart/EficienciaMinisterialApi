@@ -139,3 +139,7 @@ Aplicar la migración 005 antes de iniciar esta API. La corporación viene del a
 Se recibe idPeriodo, no un par de fechas. El calendario genera las siguientes quincenas en SQL y permite habilitarlas o cerrarlas. El front y la plantilla consultan los catálogos vigentes. Las restricciones de almacenamiento y reglas de autorización siguen siendo contratos del programa.
 
 La [revisión de carga y catálogos](docs/revision-carga-y-catalogos.md) documenta el contraste con el cuestionario, la auditoría Ponytail, el origen de los datos y los límites de las pruebas.
+
+## Exportación del resultado de validación
+
+POST `/api/primer-respondiente/cargas/validacion/excel` recibe `{ filas: [{ tipo, fila, campo, mensaje }] }` y genera un XLSX bajo demanda. `fila` puede ser null para mensajes generales. Disponible para primer respondiente y superusuario. El front envía el conjunto completo de incidencias, no solo la página visible. Esta operación formatea el resultado mostrado por el navegador; no valida un archivo nuevo, no confirma entregas ni consulta RND.

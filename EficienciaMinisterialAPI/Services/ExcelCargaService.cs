@@ -16,6 +16,38 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
         return Regex.Replace(new string(texto.Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark).ToArray()).Normalize().ToUpperInvariant(), @"\s+", " ");
     }
 
+    public static byte[] ExportarResultados(IReadOnlyList<IncidenciaValidacion> filas)
+    {
+        using var libro = new XLWorkbook();
+        var hoja = libro.AddWorksheet("Validación");
+        string[] columnas = ["TIPO", "FILA_EXCEL", "CAMPO", "DETALLE"];
+        for(var columna = 0; columna < columnas.Length; columna++)
+        {
+            hoja.Cell(1, columna + 1).Value = columnas[columna];
+        }
+        for(var indice = 0; indice < filas.Count; indice++)
+        {
+            var fila = filas[indice];
+            hoja.Cell(indice + 2, 1).Value = fila.Tipo;
+            if(fila.Fila.HasValue)
+            {
+                hoja.Cell(indice + 2, 2).Value = fila.Fila.Value;
+            }
+            hoja.Cell(indice + 2, 3).Value = fila.Campo;
+            hoja.Cell(indice + 2, 4).Value = fila.Mensaje;
+        }
+        hoja.Range(1, 1, filas.Count + 1, columnas.Length).CreateTable();
+        hoja.SheetView.FreezeRows(1);
+        hoja.Column(1).Width = 18;
+        hoja.Column(2).Width = 15;
+        hoja.Column(3).Width = 32;
+        hoja.Column(4).Width = 100;
+        hoja.Column(4).Style.Alignment.WrapText = true;
+        using var salida = new MemoryStream();
+        libro.SaveAs(salida);
+        return salida.ToArray();
+    }
+
     public async Task<(List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos)> LeerAsync(byte[] archivo, UsuarioInfo usuario)
     {
         return Leer(archivo, usuario, await catalogos.ObtenerCapturaAsync(), limites.MaximoFilas);

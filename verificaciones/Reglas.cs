@@ -132,4 +132,22 @@ foreach(var fecha in new[] { new DateTime(2026, 9, 30), new DateTime(2025, 6, 1)
         Ver(resultado.Errores.Count == 0 && resultado.Registros.Count == 1, "Se rechazó una fecha anterior permitida por el cuestionario");
     });
 }
+Probar("Excel de validación incluye errores y observaciones completos", () =>
+{
+    var filas = Enumerable.Range(1, 45).Select(i => new IncidenciaValidacion(i % 2 == 0 ? "Error" : "Observación", i + 1, "CORPORACION", "Detalle " + i)).ToList();
+    filas.Add(new("Observación", null, "", "Cruce con RND pendiente"));
+    using var memoria = new MemoryStream(ExcelCargaService.ExportarResultados(filas));
+    using var libro = new XLWorkbook(memoria);
+    var hoja = libro.Worksheet(1);
+    Ver(hoja.LastRowUsed()!.RowNumber() == filas.Count + 1, "El Excel contiene solo una página");
+    Ver(hoja.Cell(2, 1).GetString() == "Observación" && hoja.Cell(3, 1).GetString() == "Error", "No se incluyeron ambos tipos");
+    Ver(hoja.Cell(2, 2).GetValue<int>() == 2 && hoja.Cell(47, 2).IsEmpty(), "Se alteraron las filas o el aviso general");
+    Ver(hoja.Cell(47, 4).GetString() == "Cruce con RND pendiente", "Se perdió el aviso general");
+});
+Probar("Texto del reporte no se convierte en fórmula", () =>
+{
+    using var memoria = new MemoryStream(ExcelCargaService.ExportarResultados([new("Error", 2, "CAMPO", "=1+1")]));
+    using var libro = new XLWorkbook(memoria);
+    Ver(!libro.Worksheet(1).Cell(2, 4).HasFormula && libro.Worksheet(1).Cell(2, 4).GetString() == "=1+1", "Se interpretó texto como fórmula");
+});
 Environment.ExitCode = fallos == 0 ? 0 : 1;
