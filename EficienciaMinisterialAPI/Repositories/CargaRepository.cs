@@ -29,10 +29,10 @@ public sealed class CargaRepository(SqlConnectionFactory factory)
         return id;
     }
 
-    // Consulta sin institución asignada: solo SUPER_USUARIO obtiene alcance nacional en esta entrega.
+    // Se aplica únicamente el acceso elegido; no se mezclan instituciones ni entidades de otras asignaciones.
     private static string Filtro(UsuarioInfo usuario) => usuario.Rol == "SUPER_USUARIO"
         ? "1 = 1"
-        : "(@Institucion IS NULL OR c.institucion = @Institucion) AND (@Ambito = 'NACIONAL' OR NOT EXISTS(SELECT 1 FROM primer_respondiente.registro r WHERE r.id_carga = c.id AND ((@Ambito = 'ESTATAL' AND r.entidad <> @Entidad) OR (@Ambito = 'FEDERAL' AND r.tipo_fuero <> 'FF'))))";
+        : "(@Institucion IS NULL OR c.institucion = @Institucion) AND (@Ambito = 'NACIONAL' OR NOT EXISTS(SELECT 1 FROM primer_respondiente.registro r WHERE r.id_carga = c.id AND ((@Ambito = 'ESTATAL' AND r.entidad <> @Entidad))))";
 
     public async Task<IEnumerable<CargaInfo>> ListarAsync(UsuarioInfo usuario)
     {
@@ -52,8 +52,8 @@ public sealed class CargaRepository(SqlConnectionFactory factory)
         await using var tx = (SqlTransaction)await db.BeginTransactionAsync();
         var estado = await db.QuerySingleOrDefaultAsync<string>("""
             SELECT estado FROM primer_respondiente.carga WITH (UPDLOCK, HOLDLOCK)
-            WHERE id = @id AND id_usuario = @UsuarioId AND institucion = @Institucion
-            """, new { id, UsuarioId = usuario.Id, usuario.Institucion }, tx);
+            WHERE id = @id AND id_usuario = @UsuarioId AND (@EsSuper = 1 OR institucion = @Institucion)
+            """, new { id, UsuarioId = usuario.Id, usuario.Institucion, EsSuper = usuario.Rol == "SUPER_USUARIO" }, tx);
         if(estado == null)
         {
             return null;
@@ -61,7 +61,7 @@ public sealed class CargaRepository(SqlConnectionFactory factory)
         // Revalidar el alcance actual: pudo cambiar desde la carga.
         var fuera = await db.ExecuteScalarAsync<int>("""
             SELECT COUNT(*) FROM primer_respondiente.registro WHERE id_carga = @id
-            AND ((@Ambito = 'ESTATAL' AND entidad <> @Entidad) OR (@Ambito = 'FEDERAL' AND tipo_fuero <> 'FF'))
+            AND ((@Ambito = 'ESTATAL' AND entidad <> @Entidad))
             """, new { id, usuario.Ambito, usuario.Entidad }, tx);
         if(fuera > 0)
         {

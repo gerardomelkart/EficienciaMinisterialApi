@@ -73,13 +73,14 @@ try
             OnTokenValidated = async context =>
             {
                 var id = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
-                if(!int.TryParse(id, out var usuarioId))
+                var accesoClaim = context.Principal?.FindFirstValue("acceso");
+                if(!int.TryParse(id, out var usuarioId) || !int.TryParse(accesoClaim, out var accesoId))
                 {
                     context.Fail("Sesión inválida.");
                     return;
                 }
                 var usuario = await context.HttpContext.RequestServices.GetRequiredService<UsuarioService>().ObtenerAsync(usuarioId);
-                if(usuario == null)
+                if(usuario == null || !usuario.SeleccionarAcceso(accesoId))
                 {
                     context.Fail("Usuario inactivo.");
                     return;

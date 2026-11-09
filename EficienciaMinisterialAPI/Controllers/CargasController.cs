@@ -12,7 +12,7 @@ namespace EficienciaMinisterialAPI.Controllers;
 [ApiController]
 [Authorize(Roles = "PRIMER_RESPONDIENTE,SUPER_USUARIO,CONSULTA")]
 [Route("api/primer-respondiente")]
-public sealed class CargasController(ExcelCargaService excel, CargaRepository cargas) : ControllerBase
+public sealed class CargasController(ExcelCargaService excel, CargaRepository cargas, UsuarioRepository usuarios) : ControllerBase
 {
     private UsuarioInfo Usuario => (UsuarioInfo)HttpContext.Items["Usuario"]!;
 
@@ -38,7 +38,7 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         var diccionario = libro.AddWorksheet("Diccionario");
         diccionario.Cell(1, 1).Value = "Campo";
         diccionario.Cell(1, 2).Value = "Regla de esta entrega";
-        string[] reglas = ["SEDENA, SEMAR, GN o SSPC. Debe corresponder al usuario.", "AA/FC/000/DDMMAAAA/0000 o AA/FF/000/DDMMAAAA/0000. Sin IA/AI.", "Fecha de Excel, no texto.", "Texto libre, máximo 500 caracteres.", "Texto libre, máximo 300 caracteres.", "Entidad del catálogo nacional.", "Fuero común o Fuero federal."];
+        string[] reglas = ["Corporación obligatoria. Debe corresponder al acceso elegido.", "Opcional si hay nombre. Sin IA/AI. La nomenclatura inválida requiere búsqueda por nombre en RND.", "Obligatoria. Fecha de Excel, no texto. Puede ser anterior al periodo de entrega.", "Opcional, máximo 500 caracteres.", "Opcional si hay folio; máximo 300 caracteres.", "Obligatoria, dentro del alcance del usuario.", "Opcional: Fuero común o Fuero federal."];
         for(var i = 0; i < reglas.Length; i++)
         {
             diccionario.Cell(i + 2, 1).Value = ExcelCargaService.Encabezados[i];
@@ -52,11 +52,19 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         return File(memoria.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Plantilla_PrimerRespondiente.xlsx");
     }
 
-    [Authorize(Roles = "PRIMER_RESPONDIENTE")]
+    [Authorize(Roles = "PRIMER_RESPONDIENTE,SUPER_USUARIO")]
     [HttpPost("cargas/validar")]
     [RequestSizeLimit(12_000_000)]
-    public async Task<IActionResult> Validar(IFormFile archivo, [FromForm] DateTime periodoInicio, [FromForm] DateTime periodoFin)
+    public async Task<IActionResult> Validar(IFormFile archivo, [FromForm] DateTime periodoInicio, [FromForm] DateTime periodoFin, [FromForm] string? institucion = null)
     {
+        if(Usuario.Rol == "SUPER_USUARIO")
+        {
+            if(!await usuarios.InstitucionValidaAsync(institucion, "CORPORACION"))
+            {
+                return BadRequest(new { mensaje = "Seleccione una corporación activa para la carga." });
+            }
+            Usuario.Institucion = institucion;
+        }
         if(archivo.Length is <= 0 or > 10_000_000 || !Path.GetExtension(archivo.FileName).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest(new { mensaje = "Seleccione un archivo .xlsx de hasta 10 MB." });
@@ -102,7 +110,7 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         return Ok(new { valido = true, idCarga = id, totalRegistros = resultado.Registros.Count, errores = resultado.Errores, avisos = resultado.Avisos });
     }
 
-    [Authorize(Roles = "PRIMER_RESPONDIENTE")]
+    [Authorize(Roles = "PRIMER_RESPONDIENTE,SUPER_USUARIO")]
     [HttpPost("cargas/confirmar")]
     public async Task<IActionResult> Confirmar(ConfirmarCargaRequest request)
     {

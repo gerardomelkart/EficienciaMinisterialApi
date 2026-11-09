@@ -16,6 +16,13 @@ public sealed class UsuariosController(UsuarioService usuarios) : ControllerBase
         return Ok(await usuarios.ListarAsync());
     }
 
+    [HttpPut("{id:int}")]
+    public async Task<IActionResult> Actualizar(int id, ActualizarUsuarioRequest request)
+    {
+        var actualizado = await usuarios.ActualizarAsync(id, request, int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!));
+        return actualizado ? Ok(new { id }) : NotFound();
+    }
+
     [HttpPost]
     public async Task<IActionResult> Crear(CrearUsuarioRequest request)
     {

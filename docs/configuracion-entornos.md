@@ -9,7 +9,7 @@
 
 No se usa LocalDB. No se comparte la base SIIID2_QA: únicamente se reutiliza su servidor SQL. El nombre de la base no depende de ASPNETCORE_ENVIRONMENT: lo determina la cadena configurada. Production nunca debe apuntar a DEV.
 
-El responsable crea la base DEV y ejecuta `001_base.sql` y `002_catalogos.sql` del repositorio de BD. Los scripts iniciales apuntan a `EficienciaMinisterial_DEV`; si la base ya existe, `001_base.sql` completa sus objetos. La nueva cuenta debe estar mapeada en esa base y contar con los permisos descritos en el README de BD. Que un login funcione en SIIID2_QA no implica permisos sobre la nueva base ni sobre sus esquemas `seguridad`, `catalogo` y `primer_respondiente`.
+El responsable crea la base DEV y ejecuta, en orden, `001_base.sql`, `002_catalogos.sql`, `003_usuarios_y_validacion.sql` y `004_catalogos_ministeriales.sql` del repositorio de BD. Si 001 y 002 ya fueron aplicados, ejecutar únicamente 003 y 004 antes de iniciar la nueva API. Los scripts iniciales apuntan a `EficienciaMinisterial_DEV`; si la base ya existe, `001_base.sql` completa sus objetos. La nueva cuenta debe estar mapeada en esa base y contar con los permisos descritos en el README de BD. Que un login funcione en SIIID2_QA no implica permisos sobre la nueva base ni sobre sus esquemas `seguridad`, `catalogo` y `primer_respondiente`.
 
 ## Ruta de desarrollo actual
 

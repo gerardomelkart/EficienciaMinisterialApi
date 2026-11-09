@@ -30,10 +30,27 @@ public sealed class AuthController(UsuarioService usuarios, IConfiguration confi
             return Unauthorized(new { mensaje = "Usuario o contraseña incorrectos." });
         }
         logger.LogInformation("Inicio de sesión correcto. UsuarioId: {UsuarioId}. TraceId: {TraceId}", usuario.Id, HttpContext.TraceIdentifier);
+        return EmitirSesion(usuario);
+    }
+
+    [Authorize]
+    [HttpPost("acceso")]
+    public IActionResult SeleccionarAcceso(SeleccionarAccesoRequest request)
+    {
+        var usuario = (UsuarioInfo)HttpContext.Items["Usuario"]!;
+        if(!usuario.SeleccionarAcceso(request.IdAcceso))
+        {
+            return Forbid();
+        }
+        return EmitirSesion(usuario);
+    }
+
+    private IActionResult EmitirSesion(UsuarioInfo usuario)
+    {
         var vence = DateTime.UtcNow.AddHours(1);
         var token = new JwtSecurityToken(
             issuer: configuration["Jwt:Issuer"], audience: configuration["Jwt:Audience"],
-            claims: [new Claim(ClaimTypes.NameIdentifier, usuario.Id.ToString())],
+            claims: [new Claim(ClaimTypes.NameIdentifier, usuario.Id.ToString()), new Claim("acceso", usuario.IdAcceso.ToString())],
             expires: vence,
             signingCredentials: new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration["Jwt:Key"]!)), SecurityAlgorithms.HmacSha256));
         Response.Headers.CacheControl = "no-store";

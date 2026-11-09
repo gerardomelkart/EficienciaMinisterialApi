@@ -6,7 +6,7 @@ API central del proyecto, desarrollada en C# con .NET 10. Este repositorio conti
 
 Eficiencia Ministerial es una plataforma en desarrollo para recibir información de detenciones y, en una etapa posterior, incorporar el seguimiento ministerial de las fiscalías. Su arquitectura contempla una API central y una base propia, con **Primer Respondiente** como primera interfaz de captura.
 
-Esta versión reúne la base técnica y el diseño inicial. Las reglas operativas definitivas están pendientes de respuesta del área responsable; las funcionalidades provisionales no deben interpretarse como un proceso productivo terminado.
+Esta versión incorpora las primeras reglas confirmadas del cuestionario: usuarios con múltiples accesos y validación básica de la captura. El seguimiento de fiscalías, el cruce con RND y los reportes productivos siguen en desarrollo.
 
 ## Repositorios relacionados
 
@@ -24,9 +24,9 @@ El flujo implementado para las corporaciones permite descargar una plantilla, ca
 
 El flujo previsto para fiscalías consiste en descargar una plantilla con información de referencia y completar los campos de seguimiento ministerial. Esa segunda etapa todavía no está implementada.
 
-- **Disponible:** autenticación JWT, perfiles iniciales, alta y listado de usuarios, carga y validación de Excel, confirmación con folio, acuse y registros de operación.
+- **Disponible:** autenticación JWT, selección de acceso, alta/edición/activación de usuarios, carga y validación de Excel, confirmación con folio, acuse y registros de operación.
 - **Provisional:** pantallas de informes “Reporte primer respondiente” y “Reporte completo”, sin consultas ni indicadores definitivos.
-- **Pendiente:** catálogos y reglas definitivas, fiscalías estatales, plantilla de seguimiento, cruces automáticos, edición/baja de usuarios y reportes operativos.
+- **Pendiente:** catálogo definitivo de fiscalías, plantilla de seguimiento, cruces automáticos, control de quincenas y reportes operativos.
 
 Las futuras conexiones con SIIID e Ingesta de Datos no están implementadas. El cruce con RND/RND_FA, a partir de las copias generadas por DBBridge, también está pendiente. No existe actualmente un integrador entre estos sistemas.
 
@@ -50,7 +50,7 @@ Consultar la [guía de entornos, conexión, usuario inicial y logs](docs/configu
 
 ## Preparación local
 
-1. Instalar SDK .NET 10 y ejecutar los scripts `001_base.sql` y `002_catalogos.sql` del repositorio de BD.
+1. Instalar SDK .NET 10 y ejecutar los scripts `001_base.sql`, `002_catalogos.sql`, `003_usuarios_y_validacion.sql` y `004_catalogos_ministeriales.sql` del repositorio de BD.
 2. Desde `EficienciaMinisterialAPI`, configurar los secretos locales. No enviar ni guardar credenciales en Git:
 
 ```powershell
@@ -75,9 +75,12 @@ Eliminar `EM_ADMIN_PASSWORD` del entorno al terminar. El proceso finaliza despu�
 | GET `/api/estado` | Estado del proceso, sin comprobar SQL. |
 | POST `/api/auth/login` | Usuario y contraseña; token de una hora. |
 | GET `/api/auth/me` | Perfil activo actual. |
-| GET / POST `/api/usuarios` | Listado y creación; solo superusuario. |
+| GET / POST `/api/usuarios` | Listado de activas/inactivas y creación; solo superusuario. |
+| PUT `/api/usuarios/{id}` | Edición, activación/desactivación y reemplazo de accesos; solo superusuario. |
+| POST `/api/auth/acceso` | Selecciona una asignación propia mediante `idAcceso`; devuelve una sesión nueva. |
+| GET `/api/catalogos/usuarios` | Instituciones y entidades activas desde SQL; solo superusuario. |
 | GET `/api/primer-respondiente/plantilla` | Excel de siete columnas y diccionario. |
-| POST `/api/primer-respondiente/cargas/validar` | Multipart: archivo, periodoInicio y periodoFin en formato ISO. |
+| POST `/api/primer-respondiente/cargas/validar` | Multipart: archivo, periodoInicio y periodoFin en formato ISO; el superusuario agrega institucion. |
 | POST `/api/primer-respondiente/cargas/confirmar` | JSON `{ "idCarga": "UUID" }`. Confirmación idempotente por usuario. |
 | GET `/api/primer-respondiente/cargas` | Últimas 200 entregas confirmadas visibles. |
 | GET `/api/primer-respondiente/cargas/{id}` | Datos de la entrega visible. |
@@ -86,19 +89,23 @@ Eliminar `EM_ADMIN_PASSWORD` del entorno al terminar. El proceso finaliza despu�
 
 La validación no genera un folio. Guarda el archivo y las filas solo si todo el archivo es válido. La confirmación asigna un folio `EM-PR-AÑO-SECUENCIA` dentro de una transacción y registra bitácora. Repetirla devuelve la misma entrega. La fecha de inserción se genera en SQL en UTC, separada de la fecha de detención y del periodo declarado. Se ignoran las antiguas columnas H e I del Excel recibido; se conserva el archivo íntegro.
 
-Los perfiles se consultan en SQL en cada solicitud: un cambio de rol o desactivación se aplica al siguiente acceso. Solo PRIMER_RESPONDIENTE carga y confirma. SUPER_USUARIO consulta nacional y crea usuarios. CONSULTA lee dentro de la institución/ámbito asignados; sin institución puede consultar entre corporaciones, con el filtro territorial correspondiente. Una carga con filas fuera del alcance queda completamente oculta; no se entrega un archivo original con filas ajenas. FISCALIA puede autenticarse, pero su operación de seguimiento queda pendiente de definición.
+Los accesos se consultan en SQL en cada solicitud. Cada sesión trabaja con una sola asignación de perfil, institución y alcance; no se combinan los permisos territoriales de distintas asignaciones. El token incluye su identificador. La desactivación o edición de la cuenta revoca sus sesiones anteriores. Los accesos heredados FEDERAL pasan a NACIONAL en la migración 003: FGR sigue siendo la institución federal.
 
-## Reglas iniciales y pendientes
+SUPER_USUARIO administra cuentas y puede cargar para una corporación activa elegida. PRIMER_RESPONDIENTE carga dentro de su institución y entidad asignadas. CONSULTA lee dentro del alcance elegido. Una carga con filas ajenas queda completamente oculta, incluido su archivo original. FISCALIA puede autenticarse; su operación de seguimiento se implementará en una entrega posterior. No se permite desactivar ni retirar los permisos del último superusuario activo.
 
-- Siete campos requeridos provisionalmente; máximo 10 MB, 20,000 filas y 100 MB descomprimidos.
-- Folio con estructura y fecha válida; exclusión IA/AI indicada por el diccionario. Fecha de detención como fecha real de Excel. No se aceptan fórmulas en los siete campos.
-- Corporación del archivo igual a la institución de la cuenta; homologación de Marina/SEMAR y Guardia Nacional/GN. Catálogo de entidades con equivalencias comunes. Fuero común/federal.
-- Autoridad receptora libre (500 caracteres), nombre libre (300). El periodo se declara sin imponer quincenas, cierres ni relación con las fechas de las filas.
-- Los repetidos dentro del archivo y las diferencias entre fecha/fuero del folio y del reporte generan observaciones. No se eliminan ni se fusionan registros. No hay aún detección operativa de duplicados entre cargas.
-- Pendientes: cruce RND/RND_FA, decisión entre coincidencias múltiples, asignación a fiscalías, catálogos de fiscalías estatales, plantilla verde, seguimiento, aprobación, cierres y métricas.
-- La columna `homologar_a_diccionario` no forma parte del modelo.
-- No hay eliminación automática de cargas validadas sin confirmar ni recuperación de borradores desde el front. Definir retención antes de operación productiva.
-- Administración inicial: alta y consulta de usuarios. Edición, baja, recuperación/cambio de contraseña y caducidad por inactividad se incorporarán en otra entrega. El token actual vence en una hora.
+Las altas aceptan `accesos: [{ rol, institucion, ambito, entidad }]`; por compatibilidad también reciben los campos primarios en el cuerpo. La edición recibe `usuario`, `nombre`, `activo` y `accesos`, sin contraseña. Solo se admiten los ámbitos NACIONAL y ESTATAL, con entidades activas 1–32. Los cambios se auditan con el identificador interno de la cuenta objetivo.
+
+## Reglas implementadas y alcance pendiente
+
+- Corporación, fecha y entidad obligatorias. Al menos folio RND o nombre. Autoridad y fuero opcionales.
+- Máximo 10 MB, 20,000 filas y 100 MB descomprimidos; fechas de Excel y sin fórmulas. Cualquier error impide aceptar el archivo completo.
+- Se rechazan IA/AI. Una nomenclatura incorrecta genera observación para búsqueda posterior por nombre; no acredita un cruce exitoso.
+- Se normalizan acentos, espacios y mayúsculas para comparar. Se reconocen CDMX/Ciudad de México y México/Estado de México. Las fechas de detención pueden ser anteriores al periodo de entrega.
+- Las filas con folio repetido se conservan. La bandera consolidada de duplicados entre cargas y resultados RND se implementará con el cruce.
+- Los cinco catálogos ministeriales del área, incluido MASC agregado a conclusiones, quedan disponibles en SQL mediante el script 004. Todavía no se implementa la carga de respuestas de fiscalías.
+- Pendientes de implementación: RND, quincenas/cierres y reemplazos, entregas en ceros, rechazo de detenciones reportadas en periodos anteriores, plantilla verde y reportes reales. La recepción actual conserva estado de cruce PENDIENTE y no habilita envío a fiscalías.
+- Los siete puntos de negocio aún abiertos están enumerados en [el alcance de esta entrega](docs/primera-entrega-operativa.md).
+- `homologar_a_diccionario` no forma parte del modelo. Cambio/recuperación de contraseña y limpieza de cargas sin confirmar siguen pendientes.
 
 La API no contiene cadenas de conexión reales, no accede a DBBridge ni modifica sus tablas. La integración utilizará las copias diarias de DBBridge, con conexión separada de solo lectura y corte registrado cuando se defina la regla operativa.
 
@@ -108,8 +115,18 @@ La API no contiene cadenas de conexión reales, no accede a DBBridge ni modifica
 dotnet build EficienciaMinisterialAPI.slnx -c Release
 ```
 
-La solución contiene únicamente el proyecto de la API. La primera entrega se compila con SDK .NET 10; los scripts pasaron análisis de sintaxis T-SQL 2019, pero el flujo completo requiere validación en una instancia SQL Server de pruebas antes del despliegue.
+La solución contiene únicamente el proyecto de la API. Esta entrega se compila con SDK .NET 10; los scripts pasaron análisis de sintaxis T-SQL 2019, pero el flujo completo requiere validación en una instancia SQL Server de pruebas antes del despliegue.
 
 ## Formato
 
 Cuatro espacios, llaves en línea aparte, namespace de archivo y condiciones `if(...)`, conforme al fragmento proporcionado. `.editorconfig` y `.gitattributes` conservan sangría y CRLF. `.gitignore` excluye `.vs`, `bin`, `obj`, archivos de usuario, credenciales y logs. Se retiraron del seguimiento los archivos locales de Visual Studio y compilación del commit inicial.
+
+## Verificación de reglas sin SQL
+
+```powershell
+dotnet run --file verificaciones/Reglas.cs
+```
+
+Es una aplicación de archivo de .NET 10, fuera de la solución; no agrega otro proyecto a la API. Prueba libros XLSX sintéticos, normalización, campos opcionales, IA/AI y selección/validación de accesos. No prueba persistencia ni sustituye las pruebas de integración en SQL Server de desarrollo.
+
+Al actualizar desde la versión anterior se requiere volver a iniciar sesión: la API exige el identificador de acceso en los tokens nuevos. Las cuentas y contraseñas existentes se conservan.

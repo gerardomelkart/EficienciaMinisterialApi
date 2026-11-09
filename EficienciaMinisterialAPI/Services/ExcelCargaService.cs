@@ -13,7 +13,7 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos)
     public static string Normalizar(string valor)
     {
         var texto = valor.Trim().Normalize(NormalizationForm.FormD);
-        return new string(texto.Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark).ToArray()).Normalize().ToUpperInvariant();
+        return Regex.Replace(new string(texto.Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark).ToArray()).Normalize().ToUpperInvariant(), @"\s+", " ");
     }
 
     public async Task<(List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos)> LeerAsync(byte[] archivo, UsuarioInfo usuario)
@@ -26,7 +26,7 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos)
     public static (List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos) Leer(byte[] archivo, UsuarioInfo usuario, Dictionary<string, byte> catalogo)
     {
         var entidades = new Dictionary<string, byte>(catalogo);
-        foreach(var alias in new[] { ("ESTADO DE MEXICO", "MEXICO"), ("COAHUILA", "COAHUILA DE ZARAGOZA"), ("MICHOACAN", "MICHOACAN DE OCAMPO"), ("VERACRUZ", "VERACRUZ DE IGNACIO DE LA LLAVE"), ("DISTRITO FEDERAL", "CIUDAD DE MEXICO") })
+        foreach(var alias in new[] { ("ESTADO DE MEXICO", "MEXICO"), ("COAHUILA", "COAHUILA DE ZARAGOZA"), ("MICHOACAN", "MICHOACAN DE OCAMPO"), ("VERACRUZ", "VERACRUZ DE IGNACIO DE LA LLAVE"), ("DISTRITO FEDERAL", "CIUDAD DE MEXICO"), ("CDMX", "CIUDAD DE MEXICO") })
         {
             if(entidades.TryGetValue(alias.Item2, out var id))
             {
@@ -76,9 +76,9 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos)
                 {
                     errores.Add(new(fila, Encabezados[i], "Use valores, no fórmulas."));
                 }
-                if(string.IsNullOrWhiteSpace(valores[i]))
+                if((i is 0 or 2 or 5) && string.IsNullOrWhiteSpace(valores[i]))
                 {
-                    errores.Add(new(fila, Encabezados[i], "Campo requerido en esta versión inicial."));
+                    errores.Add(new(fila, Encabezados[i], "Campo obligatorio."));
                 }
             }
             var corporacion = Normalizar(valores[0]) switch
@@ -93,17 +93,29 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos)
             {
                 errores.Add(new(fila, "CORPORACION", "La corporación debe corresponder a la institución del usuario."));
             }
+            if(string.IsNullOrWhiteSpace(valores[1]) && string.IsNullOrWhiteSpace(valores[4]))
+            {
+                errores.Add(new(fila, "NOMBRE_DETENIDO", "Debe indicar folio RND o nombre de la persona detenida."));
+            }
             var folio = Normalizar(valores[1]);
+            if(folio.Length > 40)
+            {
+                errores.Add(new(fila, "FOLIO_RND", "Máximo 40 caracteres."));
+            }
+            if(Regex.IsMatch(folio, @"/(IA|AI)/"))
+            {
+                errores.Add(new(fila, "FOLIO_RND", "No se admiten folios de faltas administrativas IA/AI."));
+            }
             var partes = folio.Split('/');
             if(!Regex.IsMatch(folio, @"^[A-Z]{2}/(FC|FF)/[0-9]{3}/[0-9]{8}/[0-9]{4}$")
                 || partes.Length != 5
                 || !DateTime.TryParseExact(partes.ElementAtOrDefault(3), "ddMMyyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
             {
-                errores.Add(new(fila, "FOLIO_RND", "Folio inválido. Use AA/FC/000/DDMMAAAA/0000 o AA/FF/000/DDMMAAAA/0000. No se admiten IA/AI."));
+                avisos.Add($"Fila {fila}: sin folio válido; requiere búsqueda por nombre en RND. El cruce aún no está implementado.");
             }
-            if(!folios.Add(folio))
+            if(folio.Length > 0 && !folios.Add(folio))
             {
-                avisos.Add($"Fila {fila}: folio repetido dentro del archivo; pendiente definir su tratamiento operativo.");
+                avisos.Add($"Fila {fila}: folio repetido dentro del archivo; se conservan todas las filas para el seguimiento por persona.");
             }
             var celdaFecha = hoja.Cell(fila, 3);
             var fechaValida = celdaFecha.TryGetValue<DateTime>(out var fecha) && celdaFecha.DataType != XLDataType.Text;
@@ -120,10 +132,10 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos)
             {
                 errores.Add(new(fila, "ENTIDAD_DETENCION", "La entidad queda fuera del alcance del usuario."));
             }
-            var fuero = Normalizar(valores[6]) switch { "FUERO COMUN" => "FC", "FUERO FEDERAL" => "FF", _ => "" };
-            if(fuero.Length == 0 || (usuario.Ambito == "FEDERAL" && fuero != "FF"))
+            var fuero = Normalizar(valores[6]) switch { "FC" or "FUERO COMUN" => "FC", "FF" or "FUERO FEDERAL" => "FF", _ => "" };
+            if(valores[6].Length > 0 && fuero.Length == 0)
             {
-                errores.Add(new(fila, "TIPO_FUERO", "Use Fuero común o Fuero federal dentro del alcance del usuario."));
+                errores.Add(new(fila, "TIPO_FUERO", "Use Fuero común o Fuero federal, o deje vacío si no cuenta con la información."));
             }
             if(partes.Length == 5 && fuero.Length > 0 && partes[1] != fuero)
             {
@@ -145,6 +157,10 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos)
         if(registros.Count == 0 && errores.Count == 0)
         {
             errores.Add(new(0, "ARCHIVO", "El archivo no contiene registros."));
+        }
+        if(registros.Count > 0)
+        {
+            avisos.Add("Esta entrega valida estructura y campos. El cruce con RND está pendiente; los registros aún no están habilitados para envío a fiscalías.");
         }
         return (registros, errores, avisos);
     }
