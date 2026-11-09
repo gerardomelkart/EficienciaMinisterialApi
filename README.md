@@ -20,7 +20,7 @@ El navegador se comunica por HTTP con la API; la API consulta y persiste en SQL 
 
 ## Flujo y alcance
 
-El flujo implementado para las corporaciones permite descargar una plantilla, cargar un Excel, revisar errores y observaciones y confirmar una entrega para obtener un folio y un acuse HTML imprimible. El archivo original se conserva junto con los registros aceptados.
+El flujo implementado para las corporaciones permite descargar una plantilla, cargar un Excel, revisar errores y observaciones y confirmar una entrega para obtener un folio y un acuse PDF institucional generado bajo demanda. Se conservan los registros y metadatos de la entrega; no se almacenan archivos Excel ni PDF en la base o en el disco de la API.
 
 El flujo previsto para fiscalías consiste en descargar una plantilla con información de referencia y completar los campos de seguimiento ministerial. Esa segunda etapa todavía no está implementada.
 
@@ -50,7 +50,7 @@ Consultar la [guía de entornos, conexión, usuario inicial y logs](docs/configu
 
 ## Preparación local
 
-1. Instalar SDK .NET 10 y ejecutar los scripts `001_base.sql`, `002_catalogos.sql`, `003_usuarios_y_validacion.sql`, `004_catalogos_ministeriales.sql` y `005_periodos_y_catalogos_captura.sql` del repositorio de BD.
+1. Instalar SDK .NET 10 y ejecutar los scripts `001_base.sql`, `002_catalogos.sql`, `003_usuarios_y_validacion.sql`, `004_catalogos_ministeriales.sql`, `005_periodos_y_catalogos_captura.sql` y `006_archivos_bajo_demanda.sql` del repositorio de BD.
 2. Desde `EficienciaMinisterialAPI`, configurar los secretos locales. No enviar ni guardar credenciales en Git:
 
 ```powershell
@@ -85,14 +85,14 @@ Eliminar `EM_ADMIN_PASSWORD` del entorno al terminar. El proceso finaliza despu�
 | POST `/api/primer-respondiente/cargas/confirmar` | JSON `{ "idCarga": "UUID" }`. Confirmación idempotente por usuario. |
 | GET `/api/primer-respondiente/cargas` | Últimas 200 entregas confirmadas visibles. |
 | GET `/api/primer-respondiente/cargas/{id}` | Datos de la entrega visible. |
-| GET `/api/primer-respondiente/cargas/{id}/archivo` | Archivo original. |
-| GET `/api/primer-respondiente/cargas/{id}/acuse` | Acuse HTML descargable, imprimible o guardable como PDF desde el navegador. |
+| GET `/api/primer-respondiente/cargas/{id}/archivo` | XLSX reconstruido bajo demanda desde los registros confirmados. |
+| GET `/api/primer-respondiente/cargas/{id}/acuse` | PDF previo para el borrador propio y PDF definitivo para la entrega confirmada, generados bajo demanda. |
 
-La validación no genera un folio. Guarda el archivo y las filas solo si todo el archivo es válido. La confirmación asigna un folio `EM-PR-AÑO-SECUENCIA` dentro de una transacción y registra bitácora. Repetirla devuelve la misma entrega. La fecha de inserción se genera en SQL en UTC, separada de la fecha de detención y del periodo declarado. Se ignoran las antiguas columnas H e I del Excel recibido; se conserva el archivo íntegro.
+La validación no genera un folio. Guarda las filas y los metadatos solo si todo el archivo es válido; el binario se usa únicamente en memoria durante la petición. La confirmación asigna un folio `EM-PR-AÑO-SECUENCIA` dentro de una transacción y registra bitácora. Repetirla devuelve la misma entrega. La fecha de inserción se genera en SQL en UTC, separada de la fecha de detención y del periodo declarado. Se ignoran las antiguas columnas H e I del Excel recibido; no se conserva el binario del archivo.
 
 Los accesos se consultan en SQL en cada solicitud. Cada sesión trabaja con una sola asignación de perfil, institución y alcance; no se combinan los permisos territoriales de distintas asignaciones. El token incluye su identificador. La desactivación o edición de la cuenta revoca sus sesiones anteriores. Los accesos heredados FEDERAL pasan a NACIONAL en la migración 003: FGR sigue siendo la institución federal.
 
-SUPER_USUARIO administra cuentas y puede cargar para una corporación activa elegida. PRIMER_RESPONDIENTE carga dentro de su institución y entidad asignadas. CONSULTA lee dentro del alcance elegido. Una carga con filas ajenas queda completamente oculta, incluido su archivo original. FISCALIA puede autenticarse; su operación de seguimiento se implementará en una entrega posterior. No se permite desactivar ni retirar los permisos del último superusuario activo.
+SUPER_USUARIO administra cuentas y puede cargar para una corporación activa elegida. PRIMER_RESPONDIENTE carga dentro de su institución y entidad asignadas. CONSULTA lee dentro del alcance elegido. Una carga con filas ajenas queda completamente oculta, incluidas sus descargas. FISCALIA puede autenticarse; su operación de seguimiento se implementará en una entrega posterior. No se permite desactivar ni retirar los permisos del último superusuario activo.
 
 Las altas aceptan `accesos: [{ rol, institucion, ambito, entidad }]`; por compatibilidad también reciben los campos primarios en el cuerpo. La edición recibe `usuario`, `nombre`, `activo` y `accesos`, sin contraseña. Solo se admiten los ámbitos NACIONAL y ESTATAL, con entidades activas 1–32. Los cambios se auditan con el identificador interno de la cuenta objetivo.
 
@@ -145,3 +145,23 @@ La [revisión de carga y catálogos](docs/revision-carga-y-catalogos.md) documen
 POST `/api/primer-respondiente/cargas/validacion/excel` recibe `{ filas: [{ tipo, fila, campo, valor, mensaje }] }` y genera un XLSX bajo demanda. `fila` puede ser null para mensajes generales. Disponible para primer respondiente y superusuario. El front envía el conjunto completo de incidencias, no solo la página visible. Esta operación formatea el resultado mostrado por el navegador; no valida un archivo nuevo, no confirma entregas ni consulta RND.
 
 La respuesta de validación entrega errores y observaciones estructurados con `fila`, `campo`, `mensaje` y `valor`. El valor corresponde a la celda antes de recortar espacios o normalizar acentos y mayúsculas. Los avisos generales usan fila 0 y valor null. El XLSX incluye VALOR_EXCEL como texto; no interpreta su contenido como fórmula. Actualizar front y API juntos; el front también puede mostrar respuestas antiguas con observaciones de texto, pero esas respuestas no contienen los valores originales.
+
+## Rendimiento de cargas
+
+Las filas validadas se insertan con SqlBulkCopy dentro de la misma transacción que la cabecera y la bitácora. Se conservan claves foráneas, restricciones, triggers y filas repetidas; el folio se asigna únicamente al confirmar. Un fallo del lote revierte la operación. La lectura del periodo mantiene un bloqueo compartido hasta terminar, para impedir su cierre durante el guardado sin serializar cargas entre sí con un bloqueo de actualización.
+
+El catálogo consulta los periodos existentes y solo ejecuta GenerarPeriodos si falta el correspondiente a la fecha actual de México. No se almacena en caché: los cambios de habilitación y cierre siguen consultándose en SQL.
+
+Los logs de API incluyen tiempos de conexión, preparación y guardado del lote; consulta de periodos; y catálogos/lectura y reglas del Excel. No incluyen contenido del archivo, nombres de personas ni credenciales. Para comparar una carga, revisar los mensajes «Validación Excel», «Guardado de carga» y «Catálogo de periodos». Las pruebas locales verifican la correspondencia de los nueve campos y todas las filas del lote; el tiempo y la reversión del bulk copy deben comprobarse contra SQL Server en desarrollo. El cambio de almacenamiento descrito abajo requiere la migración 006.
+
+## Acuses y archivos bajo demanda
+
+Aplicar `scripts/006_archivos_bajo_demanda.sql` del repo de BD antes de iniciar esta API. La migración elimina la columna binaria `archivo`, incluidos los Excel guardados previamente; conserva sus filas, folios, nombre y SHA-256. Las instalaciones nuevas también ejecutan 006 (es idempotente).
+
+`GET /api/primer-respondiente/cargas/{id}/acuse` genera un PDF previo si la carga está VALIDADA y pertenece al usuario y acceso actual; el PDF definitivo requiere una carga CONFIRMADA visible para el acceso. El previo no tiene folio y se marca PREVIO. El definitivo usa la fecha de confirmación en horario de México. No se genera folio hasta confirmar.
+
+`GET /api/primer-respondiente/cargas/{id}/archivo` reconstruye un XLSX desde las filas persistidas y los catálogos. No es una copia binaria del original: normalización, metadatos, formatos, filas vacías y columnas ignoradas del libro de entrada no se conservan. Se asignan nombres descriptivos con institución, periodo y folio. Los PDF y XLSX se producen en memoria por petición.
+
+El modal sigue el patrón de SIIID2.FrontEnd; el generador PDF toma como referencia AcuseFese de IngestaDeDatos.Api y usa el mismo encabezado institucional. Solo se incorporan recursos institucionales, sin datos ni configuración de esos sistemas.
+
+El formulario multipart mantiene en memoria los archivos hasta el máximo configurado en Carga:MaximoBytes, sin el derrame temporal a disco del umbral predeterminado de ASP.NET. Ese máximo no puede superar Int32.MaxValue; el valor habitual es 10 MB. El PDF usa las fuentes estándar y codificación de FESE; caracteres fuera de Latin-1 en el nombre original pueden mostrarse como sustituciones en su texto. El nombre de descarga se construye con institución, periodo y folio, usando caracteres seguros.

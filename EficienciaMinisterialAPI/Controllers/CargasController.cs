@@ -1,6 +1,4 @@
 using System.IO.Compression;
-using System.Net;
-using System.Text;
 using ClosedXML.Excel;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -137,7 +135,7 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         {
             return BadRequest(new { mensaje = "El nombre del archivo es demasiado largo." });
         }
-        var id = await cargas.GuardarAsync(Usuario, nombre, bytes, idPeriodo, resultado.Registros);
+        var id = await cargas.GuardarAsync(Usuario, nombre, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)), idPeriodo, resultado.Registros);
         return Ok(new { valido = true, idCarga = id, totalRegistros = resultado.Registros.Count, errores = resultado.Errores, avisos = resultado.Avisos });
     }
 
@@ -167,29 +165,18 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         {
             return NotFound();
         }
-        return File((await cargas.ArchivoAsync(Usuario, id))!, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", carga.NombreArchivo);
+        return File(ExcelCargaService.GenerarArchivo(await cargas.RegistrosAsync(Usuario, id)), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", AcuseCargaService.NombreArchivo(carga, "Detenciones", "xlsx"));
     }
 
     [HttpGet("cargas/{id:guid}/acuse")]
     public async Task<IActionResult> Acuse(Guid id)
     {
-        var carga = await cargas.ObtenerAsync(Usuario, id);
+        var carga = await cargas.ObtenerParaAcuseAsync(Usuario, id);
         if(carga == null)
         {
             return NotFound();
         }
-        string E(string? texto) => WebUtility.HtmlEncode(texto ?? "");
-        var logo = Convert.ToBase64String(await System.IO.File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "Assets", "LogoSEGURIDAD.png")));
-        var html = $$"""
-            <!doctype html><html lang="es"><head><meta charset="utf-8"><title>Acuse {{E(carga.Folio)}}</title>
-            <style>body{font:16px Arial;margin:60px;color:#222}h1{color:#691c32}dl{line-height:1.8}dt{font-weight:bold}dd{margin:0 0 12px}@media print{button{display:none} }</style></head>
-            <body><img src="data:image/png;base64,{{logo}}" alt="Seguridad · Secretariado Ejecutivo" style="width:430px;max-width:100%"><h1>Eficiencia Ministerial</h1><h2>Acuse de recepción · Primer Respondiente</h2>
-            <dl><dt>Folio</dt><dd>{{E(carga.Folio)}}</dd><dt>Institución</dt><dd>{{E(carga.Institucion)}}</dd>
-            <dt>Archivo</dt><dd>{{E(carga.NombreArchivo)}}</dd><dt>Periodo declarado</dt><dd>{{carga.PeriodoInicio:yyyy-MM-dd}} al {{carga.PeriodoFin:yyyy-MM-dd}}</dd>
-            <dt>Registros aceptados</dt><dd>{{carga.TotalRegistros}}</dd><dt>Recepción (UTC)</dt><dd>{{carga.ConfirmadoUtc:yyyy-MM-dd HH:mm:ss}}</dd></dl>
-            <p>La recepción acredita la entrega del archivo. El cruce con RND está pendiente.</p>
-            <button onclick="window.print()">Imprimir o guardar PDF</button></body></html>
-            """;
-        return File(Encoding.UTF8.GetBytes(html), "text/html; charset=utf-8", $"Acuse_{carga.Folio}.html");
+        Response.Headers.CacheControl = "no-store";
+        return File(AcuseCargaService.Crear(carga), "application/pdf", AcuseCargaService.NombreArchivo(carga, "Acuse", "pdf"));
     }
 }

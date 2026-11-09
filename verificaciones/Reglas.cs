@@ -2,6 +2,7 @@
 using ClosedXML.Excel;
 using EficienciaMinisterialAPI.Models;
 using EficienciaMinisterialAPI.Services;
+using EficienciaMinisterialAPI.Repositories;
 
 int fallos = 0;
 void Probar(string nombre, Action accion)
@@ -166,5 +167,52 @@ Probar("Excel exporta el valor original como texto", () =>
     using var libro = new XLWorkbook(memoria);
     Ver(libro.Worksheet(1).Cell(2, 4).GetString() == "FUERON COMUN", "Falta el valor original");
     Ver(!libro.Worksheet(1).Cell(3, 4).HasFormula, "Se interpretó el valor como fórmula");
+});
+Probar("Lote conserva todas las filas, duplicados y campos", () =>
+{
+    var id = Guid.NewGuid();
+    var registros = Enumerable.Range(2, 2000).Select(f => new RegistroCarga(f, "SEDENA", "FOLIO REPETIDO", new DateTime(2026, 10, 5), "Autoridad de prueba", "Persona de prueba", 9, "FC")).ToList();
+    registros.Add(new(2002, "SEDENA", "", new DateTime(2025, 6, 1), "", "Persona sin folio", 9, ""));
+    using var datos = CargaRepository.PrepararRegistros(id, registros);
+    Ver(datos.Rows.Count == 2001 && datos.Columns.Count == 9, "Se perdieron filas o columnas");
+    for(var indice = 0; indice < registros.Count; indice++)
+    {
+        var fila = datos.Rows[indice];
+        var esperado = registros[indice];
+        Ver((Guid)fila["id_carga"] == id && (int)fila["fila"] == esperado.Fila
+            && (string)fila["corporacion"] == esperado.Corporacion && (string)fila["folio_rnd"] == esperado.FolioRnd
+            && (DateTime)fila["fecha_detencion"] == esperado.FechaDetencion && (string)fila["autoridad_puesta"] == esperado.AutoridadPuesta
+            && (string)fila["nombre_detenido"] == esperado.NombreDetenido && (byte)fila["entidad"] == esperado.Entidad
+            && (string)fila["tipo_fuero"] == esperado.TipoFuero, "Se alteró un campo en el lote");
+    }
+});
+Probar("Acuse PDF previo y definitivo se generan en memoria", () =>
+{
+    var carga = new CargaInfo { Id = Guid.NewGuid(), Institucion = "SSPC", Estado = "VALIDADA", NombreArchivo = "Prueba de carga.xlsx", PeriodoInicio = new DateTime(2026, 10, 1), PeriodoFin = new DateTime(2026, 10, 15), TotalRegistros = 1998, CreadoUtc = new DateTime(2026, 11, 9, 20, 0, 0) };
+    var previo = AcuseCargaService.Crear(carga);
+    Ver(System.Text.Encoding.Latin1.GetString(previo).StartsWith("%PDF-1.4"), "No se generó un PDF");
+    Ver(AcuseCargaService.NombreArchivo(carga, "Acuse", "pdf").Contains("PREVIO"), "El previo parece definitivo");
+    carga.Estado = "CONFIRMADA";
+    carga.Folio = "EM-PR-2026-1";
+    carga.ConfirmadoUtc = carga.CreadoUtc;
+    var definitivo = AcuseCargaService.Crear(carga);
+    var texto = System.Text.Encoding.Latin1.GetString(definitivo);
+    Ver(texto.Contains("EM-PR-2026-1") && texto.Contains("14:00:00"), "Falta folio o la hora no corresponde a México");
+    Ver(AcuseCargaService.NombreArchivo(carga, "Acuse", "pdf") == "Acuse_PrimerRespondiente_SSPC_20261001-20261015_EM-PR-2026-1.pdf", "Nombre incorrecto");
+    var carpeta = Environment.GetEnvironmentVariable("EM_QA_SALIDA");
+    if(!string.IsNullOrWhiteSpace(carpeta))
+    {
+        Directory.CreateDirectory(carpeta);
+        File.WriteAllBytes(Path.Combine(carpeta, "acuse-previo.pdf"), previo);
+        File.WriteAllBytes(Path.Combine(carpeta, "acuse-confirmado.pdf"), definitivo);
+    }
+});
+Probar("Excel de datos se reconstruye sin binarios guardados", () =>
+{
+    using var memoria = new MemoryStream(ExcelCargaService.GenerarArchivo([new("SSPC", "BC/FC/004/05102026/0068", new DateTime(2026, 10, 5), "Autoridad", "Persona de prueba", "CIUDAD DE MEXICO", "Fuero común")]));
+    using var libro = new XLWorkbook(memoria);
+    Ver(libro.Worksheet(1).Cell(1, 7).GetString() == "TIPO_FUERO", "Encabezados incorrectos");
+    Ver(libro.Worksheet(1).Cell(2, 3).GetDateTime() == new DateTime(2026, 10, 5), "Fecha reconstruida como texto");
+    Ver(libro.Worksheet(1).Cell(2, 5).GetString() == "Persona de prueba", "Se perdió el dato persistido");
 });
 Environment.ExitCode = fallos == 0 ? 0 : 1;

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 using ClosedXML.Excel;
@@ -6,7 +7,7 @@ using EficienciaMinisterialAPI.Repositories;
 using EficienciaMinisterialAPI.Models;
 
 namespace EficienciaMinisterialAPI.Services;
-public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga limites)
+public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga limites, ILogger<ExcelCargaService> logger)
 {
     public static readonly string[] Encabezados = ["CORPORACION", "FOLIO_RND", "FECHA_DETENCION", "AUTORIDAD_EN_DONDE_SE_HIZO_LA_PUESTA", "NOMBRE_DETENIDO", "ENTIDAD_DETENCION", "TIPO_FUERO"];
 
@@ -14,6 +15,37 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
     {
         var texto = valor.Trim().Normalize(NormalizationForm.FormD);
         return Regex.Replace(new string(texto.Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark).ToArray()).Normalize().ToUpperInvariant(), @"\s+", " ");
+    }
+
+    public static byte[] GenerarArchivo(IEnumerable<RegistroDescarga> registros)
+    {
+        using var libro = new XLWorkbook();
+        var hoja = libro.AddWorksheet("DETENCIONES");
+        for(var columna = 0; columna < Encabezados.Length; columna++)
+        {
+            hoja.Cell(1, columna + 1).Value = Encabezados[columna];
+        }
+        var fila = 2;
+        foreach(var registro in registros)
+        {
+            hoja.Cell(fila, 1).Value = registro.Corporacion;
+            hoja.Cell(fila, 2).Value = registro.FolioRnd;
+            hoja.Cell(fila, 3).Value = registro.FechaDetencion;
+            hoja.Cell(fila, 4).Value = registro.AutoridadPuesta;
+            hoja.Cell(fila, 5).Value = registro.NombreDetenido;
+            hoja.Cell(fila, 6).Value = registro.Entidad;
+            hoja.Cell(fila, 7).Value = registro.TipoFuero;
+            fila++;
+        }
+        hoja.Column(3).Style.DateFormat.Format = "dd/mm/yyyy";
+        hoja.Range(1, 1, fila - 1, Encabezados.Length).CreateTable();
+        hoja.Columns().Width = 30;
+        hoja.Column(4).Width = 50;
+        hoja.Column(5).Width = 50;
+        hoja.SheetView.FreezeRows(1);
+        using var salida = new MemoryStream();
+        libro.SaveAs(salida);
+        return salida.ToArray();
     }
 
     public static byte[] ExportarResultados(IReadOnlyList<IncidenciaValidacion> filas)
@@ -53,7 +85,12 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
 
     public async Task<(List<RegistroCarga> Registros, List<ErrorFila> Errores, List<ErrorFila> Avisos)> LeerAsync(byte[] archivo, UsuarioInfo usuario)
     {
-        return Leer(archivo, usuario, await catalogos.ObtenerCapturaAsync(), limites.MaximoFilas);
+        var reloj = Stopwatch.StartNew();
+        var catalogo = await catalogos.ObtenerCapturaAsync();
+        var catalogosMs = reloj.ElapsedMilliseconds;
+        var resultado = Leer(archivo, usuario, catalogo, limites.MaximoFilas);
+        logger.LogInformation("Validación Excel: catálogos {CatalogosMs} ms; lectura y reglas {LecturaMs} ms; registros válidos {Registros}; errores {Errores}; observaciones {Avisos}", catalogosMs, reloj.ElapsedMilliseconds - catalogosMs, resultado.Registros.Count, resultado.Errores.Count, resultado.Avisos.Count);
+        return resultado;
     }
 
     public static (List<RegistroCarga> Registros, List<ErrorFila> Errores, List<ErrorFila> Avisos) Leer(byte[] archivo, UsuarioInfo usuario, CatalogoCaptura catalogo, int maximoFilas)

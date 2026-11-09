@@ -1,9 +1,10 @@
 using Dapper;
+using System.Diagnostics;
 using EficienciaMinisterialAPI.Data;
 using EficienciaMinisterialAPI.Models;
 
 namespace EficienciaMinisterialAPI.Repositories;
-public sealed class CatalogoRepository(SqlConnectionFactory factory)
+public sealed class CatalogoRepository(SqlConnectionFactory factory, ILogger<CatalogoRepository> logger)
 {
     public async Task<object> ObtenerUsuariosAsync()
     {
@@ -49,8 +50,16 @@ public sealed class CatalogoRepository(SqlConnectionFactory factory)
 
     public async Task<IEnumerable<PeriodoInfo>> ObtenerPeriodosAsync()
     {
+        var reloj = Stopwatch.StartNew();
         await using var db = await factory.AbrirAsync();
-        await db.ExecuteAsync("primer_respondiente.GenerarPeriodos", commandType: System.Data.CommandType.StoredProcedure);
-        return await db.QueryAsync<PeriodoInfo>("SELECT id, inicio, fin FROM primer_respondiente.periodo WHERE habilitado = 1 AND cerrado = 0 ORDER BY inicio DESC");
+        var conexionMs = reloj.ElapsedMilliseconds;
+        var periodos = await db.QueryAsync<PeriodoInfo>("""
+            DECLARE @hoy date = CONVERT(date, SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)');
+            IF NOT EXISTS(SELECT 1 FROM primer_respondiente.periodo WHERE @hoy BETWEEN inicio AND fin)
+                EXEC primer_respondiente.GenerarPeriodos;
+            SELECT id, inicio, fin FROM primer_respondiente.periodo WHERE habilitado = 1 AND cerrado = 0 ORDER BY inicio DESC;
+            """);
+        logger.LogInformation("Catálogo de periodos: conexión {ConexionMs} ms; consulta {ConsultaMs} ms; total {TotalMs} ms", conexionMs, reloj.ElapsedMilliseconds - conexionMs, reloj.ElapsedMilliseconds);
+        return periodos;
     }
 }

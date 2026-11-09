@@ -79,3 +79,6 @@ public sealed class CargaInfo
 
 public sealed record IncidenciaValidacion(string Tipo, int? Fila, string Campo, string Mensaje, string? Valor = null);
 public sealed record ExportarValidacionRequest(List<IncidenciaValidacion> Filas);
+
+public sealed record RegistroDescarga(string Corporacion, string FolioRnd, DateTime FechaDetencion,
+    string AutoridadPuesta, string NombreDetenido, string Entidad, string TipoFuero);

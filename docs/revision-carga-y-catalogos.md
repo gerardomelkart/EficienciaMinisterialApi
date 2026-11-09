@@ -75,3 +75,7 @@ La pregunta 2 permite fechas de detención anteriores al periodo de entrega. Se 
 El periodo sigue debiendo estar habilitado al guardar y confirmar. Se conservan las validaciones de estructura, fecha real de Excel, corporación y alcance territorial. Se agregaron pruebas de regresión para fechas anteriores al periodo de entrega.
 
 No requiere una migración nueva. Sigue siendo necesario tener aplicada la migración 005 de periodos y catálogos de captura. Las pruebas locales no ejecutan consultas contra la base real.
+
+## Almacenamiento y acuses (2026-11-09)
+
+La entrega de acuses PDF y carga por lote retira el almacenamiento binario del Excel. Aplicar la migración 006; las filas y metadatos se conservan. Se mantiene la regla del cuestionario de permitir detenciones anteriores al periodo de entrega. El acuse previo no acredita recepción; el definitivo se genera después de confirmar y asignar folio. El cruce con RND continúa pendiente.
