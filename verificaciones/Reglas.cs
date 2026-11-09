@@ -28,7 +28,7 @@ var ambitos = new List<AmbitoInfo>
 {
     new() { Codigo = "NACIONAL" }, new() { Codigo = "ESTATAL", RequiereEntidad = true }
 };
-(List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos) Leer(byte[] bytes, UsuarioInfo cuenta, CatalogoCaptura opciones)
+(List<RegistroCarga> Registros, List<ErrorFila> Errores, List<ErrorFila> Avisos) Leer(byte[] bytes, UsuarioInfo cuenta, CatalogoCaptura opciones)
 {
     return ExcelCargaService.Leer(bytes, cuenta, opciones, 20000);
 }
@@ -142,12 +142,29 @@ Probar("Excel de validación incluye errores y observaciones completos", () =>
     Ver(hoja.LastRowUsed()!.RowNumber() == filas.Count + 1, "El Excel contiene solo una página");
     Ver(hoja.Cell(2, 1).GetString() == "Observación" && hoja.Cell(3, 1).GetString() == "Error", "No se incluyeron ambos tipos");
     Ver(hoja.Cell(2, 2).GetValue<int>() == 2 && hoja.Cell(47, 2).IsEmpty(), "Se alteraron las filas o el aviso general");
-    Ver(hoja.Cell(47, 4).GetString() == "Cruce con RND pendiente", "Se perdió el aviso general");
+    Ver(hoja.Cell(47, 5).GetString() == "Cruce con RND pendiente", "Se perdió el aviso general");
 });
 Probar("Texto del reporte no se convierte en fórmula", () =>
 {
     using var memoria = new MemoryStream(ExcelCargaService.ExportarResultados([new("Error", 2, "CAMPO", "=1+1")]));
     using var libro = new XLWorkbook(memoria);
-    Ver(!libro.Worksheet(1).Cell(2, 4).HasFormula && libro.Worksheet(1).Cell(2, 4).GetString() == "=1+1", "Se interpretó texto como fórmula");
+    Ver(!libro.Worksheet(1).Cell(2, 5).HasFormula && libro.Worksheet(1).Cell(2, 5).GetString() == "=1+1", "Se interpretó texto como fórmula");
+});
+Probar("Error conserva el valor original sin normalizar", () =>
+{
+    var bytes = CambiarCelda(Libro("", "Persona de prueba"), 2, 7, "  FUERON COMUN  ");
+    Ver(Leer(bytes, usuario, catalogo).Errores.Single(e => e.Campo == "TIPO_FUERO").Valor == "  FUERON COMUN  ", "Se perdió el valor original");
+});
+Probar("Observación conserva campo y folio original", () =>
+{
+    var resultado = Leer(Libro("folio a revisar", "Persona de prueba"), usuario, catalogo);
+    Ver(resultado.Avisos.Any(a => a.Fila == 2 && a.Campo == "FOLIO_RND" && a.Valor == "folio a revisar"), "Se perdió el contexto del aviso");
+});
+Probar("Excel exporta el valor original como texto", () =>
+{
+    using var memoria = new MemoryStream(ExcelCargaService.ExportarResultados([new("Error", 84, "TIPO_FUERO", "No reconocido", "FUERON COMUN"), new("Error", 85, "FOLIO_RND", "Revisar", "=1+1")]));
+    using var libro = new XLWorkbook(memoria);
+    Ver(libro.Worksheet(1).Cell(2, 4).GetString() == "FUERON COMUN", "Falta el valor original");
+    Ver(!libro.Worksheet(1).Cell(3, 4).HasFormula, "Se interpretó el valor como fórmula");
 });
 Environment.ExitCode = fallos == 0 ? 0 : 1;

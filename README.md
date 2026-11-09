@@ -142,4 +142,6 @@ La [revisión de carga y catálogos](docs/revision-carga-y-catalogos.md) documen
 
 ## Exportación del resultado de validación
 
-POST `/api/primer-respondiente/cargas/validacion/excel` recibe `{ filas: [{ tipo, fila, campo, mensaje }] }` y genera un XLSX bajo demanda. `fila` puede ser null para mensajes generales. Disponible para primer respondiente y superusuario. El front envía el conjunto completo de incidencias, no solo la página visible. Esta operación formatea el resultado mostrado por el navegador; no valida un archivo nuevo, no confirma entregas ni consulta RND.
+POST `/api/primer-respondiente/cargas/validacion/excel` recibe `{ filas: [{ tipo, fila, campo, valor, mensaje }] }` y genera un XLSX bajo demanda. `fila` puede ser null para mensajes generales. Disponible para primer respondiente y superusuario. El front envía el conjunto completo de incidencias, no solo la página visible. Esta operación formatea el resultado mostrado por el navegador; no valida un archivo nuevo, no confirma entregas ni consulta RND.
+
+La respuesta de validación entrega errores y observaciones estructurados con `fila`, `campo`, `mensaje` y `valor`. El valor corresponde a la celda antes de recortar espacios o normalizar acentos y mayúsculas. Los avisos generales usan fila 0 y valor null. El XLSX incluye VALOR_EXCEL como texto; no interpreta su contenido como fórmula. Actualizar front y API juntos; el front también puede mostrar respuestas antiguas con observaciones de texto, pero esas respuestas no contienen los valores originales.

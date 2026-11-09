@@ -119,7 +119,7 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         {
             return BadRequest(new { mensaje = "El archivo no es un libro XLSX válido." });
         }
-        (List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos) resultado;
+        (List<RegistroCarga> Registros, List<ErrorFila> Errores, List<ErrorFila> Avisos) resultado;
         try
         {
             resultado = await excel.LeerAsync(bytes, Usuario);

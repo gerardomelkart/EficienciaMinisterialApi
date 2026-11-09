@@ -20,7 +20,7 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
     {
         using var libro = new XLWorkbook();
         var hoja = libro.AddWorksheet("Validación");
-        string[] columnas = ["TIPO", "FILA_EXCEL", "CAMPO", "DETALLE"];
+        string[] columnas = ["TIPO", "FILA_EXCEL", "CAMPO", "VALOR_EXCEL", "DETALLE"];
         for(var columna = 0; columna < columnas.Length; columna++)
         {
             hoja.Cell(1, columna + 1).Value = columnas[columna];
@@ -34,26 +34,29 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
                 hoja.Cell(indice + 2, 2).Value = fila.Fila.Value;
             }
             hoja.Cell(indice + 2, 3).Value = fila.Campo;
-            hoja.Cell(indice + 2, 4).Value = fila.Mensaje;
+            hoja.Cell(indice + 2, 4).Value = fila.Valor ?? "";
+            hoja.Cell(indice + 2, 5).Value = fila.Mensaje;
         }
         hoja.Range(1, 1, filas.Count + 1, columnas.Length).CreateTable();
         hoja.SheetView.FreezeRows(1);
         hoja.Column(1).Width = 18;
         hoja.Column(2).Width = 15;
         hoja.Column(3).Width = 32;
-        hoja.Column(4).Width = 100;
+        hoja.Column(4).Width = 38;
         hoja.Column(4).Style.Alignment.WrapText = true;
+        hoja.Column(5).Width = 100;
+        hoja.Column(5).Style.Alignment.WrapText = true;
         using var salida = new MemoryStream();
         libro.SaveAs(salida);
         return salida.ToArray();
     }
 
-    public async Task<(List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos)> LeerAsync(byte[] archivo, UsuarioInfo usuario)
+    public async Task<(List<RegistroCarga> Registros, List<ErrorFila> Errores, List<ErrorFila> Avisos)> LeerAsync(byte[] archivo, UsuarioInfo usuario)
     {
         return Leer(archivo, usuario, await catalogos.ObtenerCapturaAsync(), limites.MaximoFilas);
     }
 
-    public static (List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos) Leer(byte[] archivo, UsuarioInfo usuario, CatalogoCaptura catalogo, int maximoFilas)
+    public static (List<RegistroCarga> Registros, List<ErrorFila> Errores, List<ErrorFila> Avisos) Leer(byte[] archivo, UsuarioInfo usuario, CatalogoCaptura catalogo, int maximoFilas)
     {
         Dictionary<string, T> NormalizarCatalogo<T>(Dictionary<string, T> valores) => valores
             .GroupBy(v => Normalizar(v.Key))
@@ -66,7 +69,7 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
         var hoja = libro.Worksheets.FirstOrDefault(h => h.Cell(1, 1).GetString().Trim() == "CORPORACION");
         List<RegistroCarga> registros = [];
         List<ErrorFila> errores = [];
-        List<string> avisos = [];
+        List<ErrorFila> avisos = [];
         if(hoja == null)
         {
             errores.Add(new(1, "ESTRUCTURA", "No se encontró una hoja con los encabezados de la plantilla."));
@@ -76,7 +79,7 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
         {
             if(hoja.Cell(1, columna).GetString().Trim() != Encabezados[columna - 1])
             {
-                errores.Add(new(1, Encabezados[columna - 1], $"Encabezado incorrecto en columna {columna}."));
+                errores.Add(new(1, Encabezados[columna - 1], $"Encabezado incorrecto en columna {columna}.", hoja.Cell(1, columna).GetString()));
             }
         }
         if(errores.Count > 0)
@@ -136,11 +139,11 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
                 || partes.Length != 5
                 || !DateTime.TryParseExact(partes.ElementAtOrDefault(3), "ddMMyyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
             {
-                avisos.Add($"Fila {fila}: sin folio válido; requiere búsqueda por nombre en RND.");
+                avisos.Add(new(fila, "FOLIO_RND", "Sin folio válido; requiere búsqueda por nombre en RND.", hoja.Cell(fila, 2).GetString()));
             }
             if(folio.Length > 0 && !folios.Add(folio))
             {
-                avisos.Add($"Fila {fila}: folio repetido dentro del archivo; se conservan todas las filas para el seguimiento por persona.");
+                avisos.Add(new(fila, "FOLIO_RND", "Folio repetido dentro del archivo; se conservan todas las filas para el seguimiento por persona.", hoja.Cell(fila, 2).GetString()));
             }
             var celdaFecha = hoja.Cell(fila, 3);
             var fechaValida = celdaFecha.TryGetValue<DateTime>(out var fecha) && celdaFecha.DataType != XLDataType.Text;
@@ -164,15 +167,22 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
             }
             if(partes.Length == 5 && fuero.Length > 0 && partes[1] != fuero)
             {
-                avisos.Add($"Fila {fila}: el fuero del folio difiere del fuero reportado; requiere revisión.");
+                avisos.Add(new(fila, "TIPO_FUERO", "El fuero del folio difiere del fuero reportado; requiere revisión.", hoja.Cell(fila, 7).GetString()));
             }
             if(fechaValida && partes.Length == 5 && DateTime.TryParseExact(partes[3], "ddMMyyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var fechaFolio) && fechaFolio.Date != fecha.Date)
             {
-                avisos.Add($"Fila {fila}: la fecha del folio difiere de la fecha reportada; se conservan los datos originales.");
+                avisos.Add(new(fila, "FECHA_DETENCION", "La fecha del folio difiere de la fecha reportada; se conservan los datos originales.", hoja.Cell(fila, 3).GetString()));
             }
             if(valores[3].Length > 500 || valores[4].Length > 300)
             {
                 errores.Add(new(fila, "LONGITUD", "Autoridad: máximo 500 caracteres. Nombre: máximo 300."));
+            }
+            for(var indice = anteriores; indice < errores.Count; indice++)
+            {
+                var columna = Array.IndexOf(Encabezados, errores[indice].Campo);
+                var valor = columna >= 0 ? hoja.Cell(fila, columna + 1).GetString()
+                    : errores[indice].Campo == "LONGITUD" ? $"Autoridad: {hoja.Cell(fila, 4).GetString()}; Nombre: {hoja.Cell(fila, 5).GetString()}" : null;
+                errores[indice] = errores[indice] with { Valor = valor };
             }
             if(errores.Count == anteriores)
             {
@@ -185,7 +195,7 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
         }
         if(registros.Count > 0)
         {
-            avisos.Add("La entrega quedará pendiente de cruce con RND. Los registros no se enviarán a fiscalías hasta completar ese cruce.");
+            avisos.Add(new(0, "", "La entrega quedará pendiente de cruce con RND. Los registros no se enviarán a fiscalías hasta completar ese cruce."));
         }
         return (registros, errores, avisos);
     }

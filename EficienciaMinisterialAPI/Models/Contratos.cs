@@ -26,7 +26,7 @@ public sealed class AccesoUsuario
     public byte? Entidad { get; set; }
 }
 public sealed record ConfirmarCargaRequest(Guid IdCarga);
-public sealed record ErrorFila(int Fila, string Campo, string Mensaje);
+public sealed record ErrorFila(int Fila, string Campo, string Mensaje, string? Valor = null);
 public sealed record RegistroCarga(int Fila, string Corporacion, string FolioRnd, DateTime FechaDetencion,
                                     string AutoridadPuesta, string NombreDetenido, byte Entidad, string TipoFuero);
 public sealed class UsuarioInfo
@@ -77,5 +77,5 @@ public sealed class CargaInfo
     public DateTime? ConfirmadoUtc { get; set; }
 }
 
-public sealed record IncidenciaValidacion(string Tipo, int? Fila, string Campo, string Mensaje);
+public sealed record IncidenciaValidacion(string Tipo, int? Fila, string Campo, string Mensaje, string? Valor = null);
 public sealed record ExportarValidacionRequest(List<IncidenciaValidacion> Filas);
