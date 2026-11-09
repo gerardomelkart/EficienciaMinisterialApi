@@ -34,6 +34,17 @@ Log.Logger = new LoggerConfiguration()
 builder.Host.UseSerilog();
 try
 {
+    var limitesCarga = builder.Configuration.GetRequiredSection("Carga").Get<LimitesCarga>()
+        ?? throw new InvalidOperationException("Configure los límites técnicos de carga.");
+    if(limitesCarga.MaximoBytes <= 0 || limitesCarga.MaximoBytes > limitesCarga.MaximoDescomprimidoBytes
+        || limitesCarga.MaximoFilas <= 0 || limitesCarga.MaximoEntradasZip <= 0)
+    {
+        throw new InvalidOperationException("Los límites técnicos de carga no son válidos.");
+    }
+    builder.Services.AddSingleton(limitesCarga);
+    builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(opciones =>
+        opciones.MultipartBodyLengthLimit = limitesCarga.MaximoBytes);
+    builder.WebHost.ConfigureKestrel(opciones => opciones.Limits.MaxRequestBodySize = limitesCarga.MaximoBytes + 1024 * 1024);
     builder.Services.AddControllers();
     builder.Services.AddProblemDetails();
     builder.Services.AddOpenApi();

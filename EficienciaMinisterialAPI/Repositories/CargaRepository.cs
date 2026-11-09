@@ -8,15 +8,23 @@ public sealed class CargaRepository(SqlConnectionFactory factory)
 {
     private const string Columnas = "id, folio, institucion, nombre_archivo AS NombreArchivo, periodo_inicio AS PeriodoInicio, periodo_fin AS PeriodoFin, estado, total_registros AS TotalRegistros, creado_utc AS CreadoUtc, confirmado_utc AS ConfirmadoUtc";
 
-    public async Task<Guid> GuardarAsync(UsuarioInfo usuario, string nombre, byte[] archivo, DateTime inicio, DateTime fin, List<RegistroCarga> registros)
+    public async Task<Guid> GuardarAsync(UsuarioInfo usuario, string nombre, byte[] archivo, int idPeriodo, List<RegistroCarga> registros)
     {
         await using var db = await factory.AbrirAsync();
         await using var tx = (SqlTransaction)await db.BeginTransactionAsync();
+        var periodo = await db.QuerySingleOrDefaultAsync<PeriodoInfo>("""
+            SELECT id, inicio, fin FROM primer_respondiente.periodo WITH(UPDLOCK, HOLDLOCK)
+            WHERE id = @idPeriodo AND habilitado = 1 AND cerrado = 0
+            """, new { idPeriodo }, tx);
+        if(periodo == null)
+        {
+            throw new ArgumentException("El periodo no existe, está deshabilitado o ya fue cerrado. Actualice la lista.");
+        }
         var id = Guid.NewGuid();
         await db.ExecuteAsync("""
-            INSERT primer_respondiente.carga(id, id_usuario, institucion, nombre_archivo, archivo, sha256, periodo_inicio, periodo_fin, estado, total_registros)
-            VALUES(@id, @UsuarioId, @Institucion, @nombre, @archivo, @hash, @inicio, @fin, 'VALIDADA', @total)
-            """, new { id, UsuarioId = usuario.Id, usuario.Institucion, nombre, archivo, hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(archivo)), inicio, fin, total = registros.Count }, tx);
+            INSERT primer_respondiente.carga(id, id_usuario, institucion, nombre_archivo, archivo, sha256, id_periodo, periodo_inicio, periodo_fin, estado, total_registros)
+            VALUES(@id, @UsuarioId, @Institucion, @nombre, @archivo, @hash, @idPeriodo, @inicio, @fin, 'VALIDADA', @total)
+            """, new { id, UsuarioId = usuario.Id, usuario.Institucion, nombre, archivo, hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(archivo)), idPeriodo, inicio = periodo.Inicio, fin = periodo.Fin, total = registros.Count }, tx);
         foreach(var registro in registros)
         {
             await db.ExecuteAsync("""
@@ -69,6 +77,17 @@ public sealed class CargaRepository(SqlConnectionFactory factory)
         }
         if(estado == "VALIDADA")
         {
+            var habilitado = await db.ExecuteScalarAsync<bool>("""
+                SELECT CAST(CASE WHEN EXISTS(
+                    SELECT 1 FROM primer_respondiente.periodo p WITH(UPDLOCK, HOLDLOCK)
+                    JOIN primer_respondiente.carga c ON c.id_periodo = p.id
+                    WHERE c.id = @id AND p.habilitado = 1 AND p.cerrado = 0
+                ) THEN 1 ELSE 0 END AS bit)
+                """, new { id }, tx);
+            if(!habilitado)
+            {
+                throw new ArgumentException("El periodo no está habilitado. Vuelva a validar el archivo con un periodo disponible.");
+            }
             await db.ExecuteAsync("""
                 UPDATE primer_respondiente.carga SET estado = 'CONFIRMADA', confirmado_utc = SYSUTCDATETIME(),
                     folio = CONCAT('EM-PR-', YEAR(SYSUTCDATETIME()), '-', NEXT VALUE FOR primer_respondiente.folio_seq)

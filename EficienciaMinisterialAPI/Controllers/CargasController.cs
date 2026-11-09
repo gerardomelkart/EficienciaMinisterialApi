@@ -12,13 +12,14 @@ namespace EficienciaMinisterialAPI.Controllers;
 [ApiController]
 [Authorize(Roles = "PRIMER_RESPONDIENTE,SUPER_USUARIO,CONSULTA")]
 [Route("api/primer-respondiente")]
-public sealed class CargasController(ExcelCargaService excel, CargaRepository cargas, UsuarioRepository usuarios) : ControllerBase
+public sealed class CargasController(ExcelCargaService excel, CargaRepository cargas, UsuarioRepository usuarios, LimitesCarga limites, CatalogoRepository catalogos) : ControllerBase
 {
     private UsuarioInfo Usuario => (UsuarioInfo)HttpContext.Items["Usuario"]!;
 
     [HttpGet("plantilla")]
-    public IActionResult Plantilla()
+    public async Task<IActionResult> Plantilla()
     {
+        var catalogo = await catalogos.ObtenerCapturaAsync();
         using var libro = new XLWorkbook();
         var hoja = libro.AddWorksheet("PLANTILLA");
         for(var i = 0; i < ExcelCargaService.Encabezados.Length; i++)
@@ -38,7 +39,7 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         var diccionario = libro.AddWorksheet("Diccionario");
         diccionario.Cell(1, 1).Value = "Campo";
         diccionario.Cell(1, 2).Value = "Regla de esta entrega";
-        string[] reglas = ["Corporación obligatoria. Debe corresponder al acceso elegido.", "Opcional si hay nombre. Sin IA/AI. La nomenclatura inválida requiere búsqueda por nombre en RND.", "Obligatoria. Fecha de Excel, no texto. Puede ser anterior al periodo de entrega.", "Opcional, máximo 500 caracteres.", "Opcional si hay folio; máximo 300 caracteres.", "Obligatoria, dentro del alcance del usuario.", "Opcional: Fuero común o Fuero federal."];
+        string[] reglas = ["Corporación obligatoria. Debe corresponder al acceso elegido.", "Opcional si hay nombre. Sin IA/AI. La nomenclatura inválida requiere búsqueda por nombre en RND.", "Obligatoria. Fecha de Excel, no texto. Puede ser anterior al periodo de entrega.", "Opcional, máximo 500 caracteres.", "Opcional si hay folio; máximo 300 caracteres.", "Obligatoria, dentro del alcance del usuario.", "Opcional. Consulte la hoja Catálogos para los valores vigentes."];
         for(var i = 0; i < reglas.Length; i++)
         {
             diccionario.Cell(i + 2, 1).Value = ExcelCargaService.Encabezados[i];
@@ -47,6 +48,26 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         diccionario.Column(1).Width = 48;
         diccionario.Column(2).Width = 90;
         diccionario.Columns().Style.Alignment.WrapText = true;
+        var referencia = libro.AddWorksheet("Catálogos");
+        referencia.Cell(1, 1).Value = "Campo";
+        referencia.Cell(1, 2).Value = "Valor reconocido";
+        referencia.Cell(1, 3).Value = "Código";
+        var filaCatalogo = 2;
+        void AgregarCatalogo<T>(string campo, Dictionary<string, T> valores)
+        {
+            foreach(var valor in valores.OrderBy(v => v.Key))
+            {
+                referencia.Cell(filaCatalogo, 1).Value = campo;
+                referencia.Cell(filaCatalogo, 2).Value = valor.Key;
+                referencia.Cell(filaCatalogo, 3).Value = Convert.ToString(valor.Value) ?? "";
+                filaCatalogo++;
+            }
+        }
+        AgregarCatalogo("CORPORACION", catalogo.Corporaciones);
+        AgregarCatalogo("ENTIDAD_DETENCION", catalogo.Entidades);
+        AgregarCatalogo("TIPO_FUERO", catalogo.Fueros);
+        referencia.Columns().Width = 38;
+        referencia.SheetView.FreezeRows(1);
         using var memoria = new MemoryStream();
         libro.SaveAs(memoria);
         return File(memoria.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Plantilla_PrimerRespondiente.xlsx");
@@ -54,8 +75,7 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
 
     [Authorize(Roles = "PRIMER_RESPONDIENTE,SUPER_USUARIO")]
     [HttpPost("cargas/validar")]
-    [RequestSizeLimit(12_000_000)]
-    public async Task<IActionResult> Validar(IFormFile archivo, [FromForm] DateTime periodoInicio, [FromForm] DateTime periodoFin, [FromForm] string? institucion = null)
+    public async Task<IActionResult> Validar(IFormFile archivo, [FromForm] int idPeriodo, [FromForm] string? institucion = null)
     {
         if(Usuario.Rol == "SUPER_USUARIO")
         {
@@ -65,13 +85,13 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
             }
             Usuario.Institucion = institucion;
         }
-        if(archivo.Length is <= 0 or > 10_000_000 || !Path.GetExtension(archivo.FileName).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
+        if(archivo.Length <= 0 || archivo.Length > limites.MaximoBytes || !Path.GetExtension(archivo.FileName).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
         {
-            return BadRequest(new { mensaje = "Seleccione un archivo .xlsx de hasta 10 MB." });
+            return BadRequest(new { mensaje = $"Seleccione un archivo .xlsx de hasta {limites.MaximoBytes:N0} bytes." });
         }
-        if(periodoInicio.Year < 2000 || periodoFin.Year > 2100 || periodoFin.Date < periodoInicio.Date)
+        if(idPeriodo <= 0)
         {
-            return BadRequest(new { mensaje = "Indique un periodo válido entre 2000 y 2100." });
+            return BadRequest(new { mensaje = "Seleccione un periodo quincenal habilitado." });
         }
         using var memoria = new MemoryStream();
         await archivo.CopyToAsync(memoria);
@@ -79,7 +99,7 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         try
         {
             using var zip = new ZipArchive(new MemoryStream(bytes));
-            if(zip.Entries.Count > 2000 || zip.Entries.Sum(e => e.Length) > 100_000_000)
+            if(zip.Entries.Count > limites.MaximoEntradasZip || zip.Entries.Sum(e => e.Length) > limites.MaximoDescomprimidoBytes)
             {
                 return BadRequest(new { mensaje = "El contenido descomprimido supera el límite técnico." });
             }
@@ -106,7 +126,7 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         {
             return BadRequest(new { mensaje = "El nombre del archivo es demasiado largo." });
         }
-        var id = await cargas.GuardarAsync(Usuario, nombre, bytes, periodoInicio.Date, periodoFin.Date, resultado.Registros);
+        var id = await cargas.GuardarAsync(Usuario, nombre, bytes, idPeriodo, resultado.Registros);
         return Ok(new { valido = true, idCarga = id, totalRegistros = resultado.Registros.Count, errores = resultado.Errores, avisos = resultado.Avisos });
     }
 

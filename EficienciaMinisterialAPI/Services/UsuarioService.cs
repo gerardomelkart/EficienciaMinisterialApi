@@ -2,15 +2,18 @@ using EficienciaMinisterialAPI.Repositories;
 using EficienciaMinisterialAPI.Models;
 
 namespace EficienciaMinisterialAPI.Services;
-public sealed class UsuarioService(UsuarioRepository repository)
+public sealed class UsuarioService(UsuarioRepository repository, CatalogoRepository catalogos)
 {
+    private static readonly string HashInexistente = BCrypt.Net.BCrypt.HashPassword(
+        Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)), 12);
+
     public Task<UsuarioInfo?> ObtenerAsync(int id) => repository.ObtenerAsync(id);
     public Task<IEnumerable<UsuarioInfo>> ListarAsync() => repository.ListarAsync();
 
     public async Task<UsuarioInfo?> AutenticarAsync(LoginRequest request)
     {
         var usuario = await repository.ObtenerCredencialesAsync(request.Usuario.Trim());
-        var hash = usuario?.PasswordHash ?? "$2a$11$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+        var hash = usuario?.PasswordHash ?? HashInexistente;
         if(!BCrypt.Net.BCrypt.Verify(request.Password, hash) || usuario == null)
         {
             return null;
@@ -44,20 +47,21 @@ public sealed class UsuarioService(UsuarioRepository repository)
         return await repository.ActualizarAsync(id, request, actor);
     }
 
-    public static void ValidarEstructuraAccesos(List<AccesoUsuario> accesos)
+    public static void ValidarEstructuraAccesos(List<AccesoUsuario> accesos, List<PerfilInfo> perfiles, List<AmbitoInfo> ambitos)
     {
         if(accesos.Count is < 1 or > 100 || accesos.Any(a => a == null))
         {
             throw new ArgumentException("Asigne entre 1 y 100 accesos válidos.");
         }
-        string[] roles = ["SUPER_USUARIO", "PRIMER_RESPONDIENTE", "FISCALIA", "CONSULTA"];
         foreach(var acceso in accesos)
         {
-            if(!roles.Contains(acceso.Rol) || acceso.Ambito is not ("NACIONAL" or "ESTATAL")
-                || (acceso.Ambito == "ESTATAL" && acceso.Entidad is not (>= 1 and <= 32))
-                || (acceso.Ambito == "NACIONAL" && acceso.Entidad != null)
+            var perfil = perfiles.Find(p => p.Codigo == acceso.Rol);
+            var ambito = ambitos.Find(a => a.Codigo == acceso.Ambito);
+            if(perfil == null || ambito == null
+                || (ambito.RequiereEntidad && (acceso.Entidad == null || !perfil.PermiteEstatal))
+                || (!ambito.RequiereEntidad && acceso.Entidad != null)
                 || (acceso.Rol == "SUPER_USUARIO" && (acceso.Ambito != "NACIONAL" || acceso.Institucion != null))
-                || (acceso.Rol is "PRIMER_RESPONDIENTE" or "FISCALIA" && string.IsNullOrWhiteSpace(acceso.Institucion)))
+                || (perfil.RequiereInstitucion && string.IsNullOrWhiteSpace(acceso.Institucion)))
             {
                 throw new ArgumentException("Perfil o alcance inválido. Asigne una institución y una entidad cuando correspondan.");
             }
@@ -70,7 +74,8 @@ public sealed class UsuarioService(UsuarioRepository repository)
 
     private async Task ValidarAccesosAsync(List<AccesoUsuario> accesos)
     {
-        ValidarEstructuraAccesos(accesos);
+        var opciones = await catalogos.ObtenerPerfilesAsync();
+        ValidarEstructuraAccesos(accesos, opciones.Perfiles, opciones.Ambitos);
         foreach(var acceso in accesos)
         {
             acceso.Institucion = acceso.Institucion?.Trim().ToUpperInvariant();
@@ -78,7 +83,7 @@ public sealed class UsuarioService(UsuarioRepository repository)
             {
                 throw new ArgumentException("La entidad no está activa en el catálogo.");
             }
-            var tipo = acceso.Rol == "PRIMER_RESPONDIENTE" ? "CORPORACION" : acceso.Rol == "FISCALIA" ? "FISCALIA" : null;
+            var tipo = opciones.Perfiles.Single(p => p.Codigo == acceso.Rol).TipoInstitucion;
             if(acceso.Institucion != null && !await repository.InstitucionValidaAsync(acceso.Institucion, tipo))
             {
                 throw new ArgumentException("La institución no corresponde al perfil o no está activa.");

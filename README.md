@@ -50,7 +50,7 @@ Consultar la [guía de entornos, conexión, usuario inicial y logs](docs/configu
 
 ## Preparación local
 
-1. Instalar SDK .NET 10 y ejecutar los scripts `001_base.sql`, `002_catalogos.sql`, `003_usuarios_y_validacion.sql` y `004_catalogos_ministeriales.sql` del repositorio de BD.
+1. Instalar SDK .NET 10 y ejecutar los scripts `001_base.sql`, `002_catalogos.sql`, `003_usuarios_y_validacion.sql`, `004_catalogos_ministeriales.sql` y `005_periodos_y_catalogos_captura.sql` del repositorio de BD.
 2. Desde `EficienciaMinisterialAPI`, configurar los secretos locales. No enviar ni guardar credenciales en Git:
 
 ```powershell
@@ -78,9 +78,10 @@ Eliminar `EM_ADMIN_PASSWORD` del entorno al terminar. El proceso finaliza despu�
 | GET / POST `/api/usuarios` | Listado de activas/inactivas y creación; solo superusuario. |
 | PUT `/api/usuarios/{id}` | Edición, activación/desactivación y reemplazo de accesos; solo superusuario. |
 | POST `/api/auth/acceso` | Selecciona una asignación propia mediante `idAcceso`; devuelve una sesión nueva. |
-| GET `/api/catalogos/usuarios` | Instituciones y entidades activas desde SQL; solo superusuario. |
+| GET `/api/catalogos/usuarios` | Instituciones, entidades, perfiles y ámbitos desde SQL; solo superusuario. |
+| GET `/api/catalogos/carga` | Quincenas habilitadas desde SQL y límites técnicos configurados; primer respondiente y superusuario. |
 | GET `/api/primer-respondiente/plantilla` | Excel de siete columnas y diccionario. |
-| POST `/api/primer-respondiente/cargas/validar` | Multipart: archivo, periodoInicio y periodoFin en formato ISO; el superusuario agrega institucion. |
+| POST `/api/primer-respondiente/cargas/validar` | Multipart: archivo e idPeriodo; el superusuario agrega institucion. Las fechas se obtienen del periodo en SQL. |
 | POST `/api/primer-respondiente/cargas/confirmar` | JSON `{ "idCarga": "UUID" }`. Confirmación idempotente por usuario. |
 | GET `/api/primer-respondiente/cargas` | Últimas 200 entregas confirmadas visibles. |
 | GET `/api/primer-respondiente/cargas/{id}` | Datos de la entrega visible. |
@@ -98,11 +99,11 @@ Las altas aceptan `accesos: [{ rol, institucion, ambito, entidad }]`; por compat
 ## Reglas implementadas y alcance pendiente
 
 - Corporación, fecha y entidad obligatorias. Al menos folio RND o nombre. Autoridad y fuero opcionales.
-- Máximo 10 MB, 20,000 filas y 100 MB descomprimidos; fechas de Excel y sin fórmulas. Cualquier error impide aceptar el archivo completo.
+- Los límites técnicos se configuran en la sección Carga y se entregan al front; fechas de Excel y sin fórmulas. Cualquier error impide aceptar el archivo completo.
 - Se rechazan IA/AI. Una nomenclatura incorrecta genera observación para búsqueda posterior por nombre; no acredita un cruce exitoso.
 - Se normalizan acentos, espacios y mayúsculas para comparar. Se reconocen CDMX/Ciudad de México y México/Estado de México. Las fechas de detención pueden ser anteriores al periodo de entrega.
 - Las filas con folio repetido se conservan. La bandera consolidada de duplicados entre cargas y resultados RND se implementará con el cruce.
-- Los cinco catálogos ministeriales del área, incluido MASC agregado a conclusiones, quedan disponibles en SQL mediante el script 004. Todavía no se implementa la carga de respuestas de fiscalías.
+- Los cinco catálogos ministeriales del área, incluido MASC agregado a conclusiones, quedan disponibles en SQL mediante el script 004. El script 005 agrega perfiles, ámbitos, equivalencias y periodos quincenales. Todavía no se implementa la carga de respuestas de fiscalías.
 - Pendientes de implementación: RND, quincenas/cierres y reemplazos, entregas en ceros, rechazo de detenciones reportadas en periodos anteriores, plantilla verde y reportes reales. La recepción actual conserva estado de cruce PENDIENTE y no habilita envío a fiscalías.
 - Los siete puntos de negocio aún abiertos están enumerados en [el alcance de esta entrega](docs/primera-entrega-operativa.md).
 - `homologar_a_diccionario` no forma parte del modelo. Cambio/recuperación de contraseña y limpieza de cargas sin confirmar siguen pendientes.
@@ -130,3 +131,11 @@ dotnet run --file verificaciones/Reglas.cs
 Es una aplicación de archivo de .NET 10, fuera de la solución; no agrega otro proyecto a la API. Prueba libros XLSX sintéticos, normalización, campos opcionales, IA/AI y selección/validación de accesos. No prueba persistencia ni sustituye las pruebas de integración en SQL Server de desarrollo.
 
 Al actualizar desde la versión anterior se requiere volver a iniciar sesión: la API exige el identificador de acceso en los tokens nuevos. Las cuentas y contraseñas existentes se conservan.
+
+## Corrección de carga y revisión de valores fijos
+
+Aplicar la migración 005 antes de iniciar esta API. La corporación viene del acceso del primer respondiente; solo superusuario puede elegir otra desde el catálogo. Todas las filas se validan contra esa corporación y, en alcance estatal, contra su entidad.
+
+Se recibe idPeriodo, no un par de fechas. El calendario genera las siguientes quincenas en SQL y permite habilitarlas o cerrarlas. El front y la plantilla consultan los catálogos vigentes. Las restricciones de almacenamiento y reglas de autorización siguen siendo contratos del programa.
+
+La [revisión de carga y catálogos](docs/revision-carga-y-catalogos.md) documenta el contraste con el cuestionario, la auditoría Ponytail, el origen de los datos y los límites de las pruebas.

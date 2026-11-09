@@ -80,7 +80,7 @@ public sealed class UsuarioRepository(SqlConnectionFactory factory)
     public async Task<bool> EntidadValidaAsync(byte? entidad)
     {
         await using var db = await factory.AbrirAsync();
-        return await db.ExecuteScalarAsync<bool>("SELECT CAST(CASE WHEN EXISTS(SELECT 1 FROM catalogo.entidad WHERE id = @entidad AND id BETWEEN 1 AND 32 AND activo = 1) THEN 1 ELSE 0 END AS bit)", new { entidad });
+        return await db.ExecuteScalarAsync<bool>("SELECT CAST(CASE WHEN EXISTS(SELECT 1 FROM catalogo.entidad WHERE id = @entidad AND permite_captura = 1 AND activo = 1) THEN 1 ELSE 0 END AS bit)", new { entidad });
     }
 
     public async Task<int> CrearAsync(CrearUsuarioRequest request, List<AccesoUsuario> accesos, string hash, int? actor)

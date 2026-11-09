@@ -9,7 +9,7 @@
 
 No se usa LocalDB. No se comparte la base SIIID2_QA: únicamente se reutiliza su servidor SQL. El nombre de la base no depende de ASPNETCORE_ENVIRONMENT: lo determina la cadena configurada. Production nunca debe apuntar a DEV.
 
-El responsable crea la base DEV y ejecuta, en orden, `001_base.sql`, `002_catalogos.sql`, `003_usuarios_y_validacion.sql` y `004_catalogos_ministeriales.sql` del repositorio de BD. Si 001 y 002 ya fueron aplicados, ejecutar únicamente 003 y 004 antes de iniciar la nueva API. Los scripts iniciales apuntan a `EficienciaMinisterial_DEV`; si la base ya existe, `001_base.sql` completa sus objetos. La nueva cuenta debe estar mapeada en esa base y contar con los permisos descritos en el README de BD. Que un login funcione en SIIID2_QA no implica permisos sobre la nueva base ni sobre sus esquemas `seguridad`, `catalogo` y `primer_respondiente`.
+El responsable crea la base DEV y ejecuta, en orden, `001_base.sql`, `002_catalogos.sql`, `003_usuarios_y_validacion.sql`, `004_catalogos_ministeriales.sql` y `005_periodos_y_catalogos_captura.sql` del repositorio de BD. Aplicar únicamente las migraciones que falten, en orden, antes de iniciar la API actualizada. Los scripts iniciales apuntan a `EficienciaMinisterial_DEV`; si la base ya existe, `001_base.sql` completa sus objetos. La nueva cuenta debe estar mapeada en esa base y contar con los permisos descritos en el README de BD. Que un login funcione en SIIID2_QA no implica permisos sobre la nueva base ni sobre sus esquemas `seguridad`, `catalogo` y `primer_respondiente`.
 
 ## Ruta de desarrollo actual
 
@@ -115,3 +115,5 @@ Logging__Directorio=/var/log/eficiencia-ministerial-api
 Los valores anteriores son marcadores de ejemplo. Completar únicamente en el servidor y asignar lectura al usuario que ejecuta el servicio. Verificar permisos SQL y de escritura en logs antes de iniciar. User Secrets no se copia al publicar: la configuración del servidor se conserva fuera de la publicación. La clave JWT de producción debe ser distinta de la de desarrollo.
 
 Para quien revise este repo público: no se requieren credenciales reales para compilar. Para probar el flujo completo, crear una base de pruebas propia, instalar los scripts y proporcionar sus secretos mediante estos mecanismos. No subir archivos `.env`, credenciales reales ni logs al repositorio.
+
+La sección Carga de appsettings.json contiene los límites técnicos de archivos y filas. Puede sobrescribirse mediante configuración de entorno (por ejemplo, Carga__MaximoBytes). El front obtiene esos límites desde la API.
