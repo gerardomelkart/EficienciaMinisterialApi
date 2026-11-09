@@ -16,12 +16,12 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
         return Regex.Replace(new string(texto.Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark).ToArray()).Normalize().ToUpperInvariant(), @"\s+", " ");
     }
 
-    public async Task<(List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos)> LeerAsync(byte[] archivo, UsuarioInfo usuario)
+    public async Task<(List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos)> LeerAsync(byte[] archivo, UsuarioInfo usuario, PeriodoInfo periodo)
     {
-        return Leer(archivo, usuario, await catalogos.ObtenerCapturaAsync(), limites.MaximoFilas);
+        return Leer(archivo, usuario, await catalogos.ObtenerCapturaAsync(), limites.MaximoFilas, periodo);
     }
 
-    public static (List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos) Leer(byte[] archivo, UsuarioInfo usuario, CatalogoCaptura catalogo, int maximoFilas)
+    public static (List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos) Leer(byte[] archivo, UsuarioInfo usuario, CatalogoCaptura catalogo, int maximoFilas, PeriodoInfo periodo)
     {
         Dictionary<string, T> NormalizarCatalogo<T>(Dictionary<string, T> valores) => valores
             .GroupBy(v => Normalizar(v.Key))
@@ -115,6 +115,10 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
             if(!fechaValida)
             {
                 errores.Add(new(fila, "FECHA_DETENCION", "Debe ser una fecha de Excel, no texto."));
+            }
+            else if(fecha.Date < periodo.Inicio.Date || fecha.Date > periodo.Fin.Date)
+            {
+                errores.Add(new(fila, "FECHA_DETENCION", $"La fecha debe estar entre {periodo.Inicio:dd/MM/yyyy} y {periodo.Fin:dd/MM/yyyy}, inclusive."));
             }
             var entidadValida = entidades.TryGetValue(Normalizar(valores[5]), out var entidad);
             if(!entidadValida)

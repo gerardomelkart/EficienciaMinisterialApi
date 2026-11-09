@@ -39,7 +39,7 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         var diccionario = libro.AddWorksheet("Diccionario");
         diccionario.Cell(1, 1).Value = "Campo";
         diccionario.Cell(1, 2).Value = "Regla de esta entrega";
-        string[] reglas = ["Corporación obligatoria. Debe corresponder al acceso elegido.", "Opcional si hay nombre. Sin IA/AI. La nomenclatura inválida requiere búsqueda por nombre en RND.", "Obligatoria. Fecha de Excel, no texto. Puede ser anterior al periodo de entrega.", "Opcional, máximo 500 caracteres.", "Opcional si hay folio; máximo 300 caracteres.", "Obligatoria, dentro del alcance del usuario.", "Opcional. Consulte la hoja Catálogos para los valores vigentes."];
+        string[] reglas = ["Corporación obligatoria. Debe corresponder al acceso elegido.", "Opcional si hay nombre. Sin IA/AI. La nomenclatura inválida requiere búsqueda por nombre en RND.", "Obligatoria. Fecha de Excel, no texto. Debe estar dentro de la quincena seleccionada, sin tolerancia de días.", "Opcional, máximo 500 caracteres.", "Opcional si hay folio; máximo 300 caracteres.", "Obligatoria, dentro del alcance del usuario.", "Opcional. Consulte la hoja Catálogos para los valores vigentes."];
         for(var i = 0; i < reglas.Length; i++)
         {
             diccionario.Cell(i + 2, 1).Value = ExcelCargaService.Encabezados[i];
@@ -93,6 +93,11 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         {
             return BadRequest(new { mensaje = "Seleccione un periodo quincenal habilitado." });
         }
+        var periodo = await catalogos.ObtenerPeriodoAsync(idPeriodo);
+        if(periodo == null)
+        {
+            return BadRequest(new { mensaje = "El periodo no existe, está deshabilitado o ya fue cerrado. Actualice la lista." });
+        }
         using var memoria = new MemoryStream();
         await archivo.CopyToAsync(memoria);
         var bytes = memoria.ToArray();
@@ -111,7 +116,7 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         (List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos) resultado;
         try
         {
-            resultado = await excel.LeerAsync(bytes, Usuario);
+            resultado = await excel.LeerAsync(bytes, Usuario, periodo);
         }
         catch(Exception ex) when(ex is InvalidDataException or FormatException or System.Xml.XmlException or ClosedXML.Excel.Exceptions.ClosedXMLException)
         {

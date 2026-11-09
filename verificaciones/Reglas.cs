@@ -18,6 +18,7 @@ var catalogo = new CatalogoCaptura
     Corporaciones = new() { ["SEDENA"] = "SEDENA", ["DEFENSA"] = "SEDENA", ["SEMAR"] = "SEMAR" },
     Fueros = new() { ["FC"] = "FC", ["Fuero común"] = "FC", ["FF"] = "FF", ["Fuero federal"] = "FF" }
 };
+var periodo = new PeriodoInfo { Inicio = new DateTime(2026, 10, 1), Fin = new DateTime(2026, 10, 15) };
 var perfiles = new List<PerfilInfo>
 {
     new() { Codigo = "SUPER_USUARIO" },
@@ -30,7 +31,7 @@ var ambitos = new List<AmbitoInfo>
 };
 (List<RegistroCarga> Registros, List<ErrorFila> Errores, List<string> Avisos) Leer(byte[] bytes, UsuarioInfo cuenta, CatalogoCaptura opciones)
 {
-    return ExcelCargaService.Leer(bytes, cuenta, opciones, 20000);
+    return ExcelCargaService.Leer(bytes, cuenta, opciones, 20000, periodo);
 }
 byte[] CambiarCelda(byte[] bytes, int fila, int columna, string valor)
 {
@@ -41,14 +42,14 @@ byte[] CambiarCelda(byte[] bytes, int fila, int columna, string valor)
     libro.SaveAs(salida);
     return salida.ToArray();
 }
-byte[] Libro(string folio, string nombre, string autoridad = "", string fuero = "", string entidad = "CDMX", bool dos = false)
+byte[] Libro(string folio, string nombre, string autoridad = "", string fuero = "", string entidad = "CDMX", bool dos = false, DateTime? fecha = null)
 {
     using var libro = new XLWorkbook(); var hoja = libro.AddWorksheet("PLANTILLA");
     for(int c = 0; c < 7; c++) hoja.Cell(1, c + 1).Value = ExcelCargaService.Encabezados[c];
     for(int f = 2; f <= (dos ? 3 : 2); f++)
     {
         hoja.Cell(f, 1).Value = "SEDENA"; hoja.Cell(f, 2).Value = folio;
-        hoja.Cell(f, 3).Value = new DateTime(2026, 10, 5); hoja.Cell(f, 4).Value = autoridad;
+        hoja.Cell(f, 3).Value = (fecha ?? new DateTime(2026, 10, 5)); hoja.Cell(f, 4).Value = autoridad;
         hoja.Cell(f, 5).Value = dos ? nombre + " " + f : nombre; hoja.Cell(f, 6).Value = entidad; hoja.Cell(f, 7).Value = fuero;
     }
     using var m = new MemoryStream(); libro.SaveAs(m); return m.ToArray();
@@ -118,10 +119,35 @@ Probar("Fuero debe estar en el catálogo recibido", () =>
 });
 Probar("Límite de filas configurado", () =>
 {
-    Ver(ExcelCargaService.Leer(Libro("", "Persona de prueba", dos: true), usuario, catalogo, 1).Errores.Any(e => e.Campo == "ARCHIVO"), "Se ignoró el límite configurado");
+    Ver(ExcelCargaService.Leer(Libro("", "Persona de prueba", dos: true), usuario, catalogo, 1, periodo).Errores.Any(e => e.Campo == "ARCHIVO"), "Se ignoró el límite configurado");
 });
 Probar("Etiqueta del periodo usa sus fechas reales", () =>
 {
     Ver(new PeriodoInfo { Inicio = new DateTime(2084, 2, 16), Fin = new DateTime(2084, 2, 29) }.Nombre == "Segunda quincena de febrero 2084", "El periodo depende de una lista fija");
 });
+foreach(var fecha in new[] { new DateTime(2026, 10, 1), new DateTime(2026, 10, 15, 23, 59, 59) })
+{
+    Probar("Fecha dentro del periodo: " + fecha, () => Ver(Leer(Libro("", "Persona de prueba", fecha: fecha), usuario, catalogo).Errores.Count == 0, "Se rechazó un límite incluido"));
+}
+foreach(var fecha in new[] { new DateTime(2026, 9, 30), new DateTime(2026, 10, 16), new DateTime(2025, 10, 5) })
+{
+    Probar("Fecha fuera del periodo: " + fecha, () => Ver(Leer(Libro("", "Persona de prueba", fecha: fecha), usuario, catalogo).Errores.Any(e => e.Fila == 2 && e.Campo == "FECHA_DETENCION"), "Se aceptó una fecha fuera del periodo"));
+}
+foreach(var rango in new[]
+{
+    new PeriodoInfo { Inicio = new DateTime(2024, 2, 16), Fin = new DateTime(2024, 2, 29) },
+    new PeriodoInfo { Inicio = new DateTime(2026, 12, 16), Fin = new DateTime(2026, 12, 31) }
+})
+{
+    foreach(var fecha in new[] { rango.Inicio, rango.Fin, rango.Inicio.AddDays(-1), rango.Fin.AddDays(1) })
+    {
+        Probar($"Rango variable {rango.Nombre}: {fecha:yyyy-MM-dd}", () =>
+        {
+            var resultado = ExcelCargaService.Leer(Libro("", "Persona de prueba", fecha: fecha), usuario, catalogo, 20000, rango);
+            var dentro = fecha >= rango.Inicio && fecha <= rango.Fin;
+            Ver(dentro ? resultado.Registros.Count == 1 && resultado.Errores.Count == 0
+                : resultado.Registros.Count == 0 && resultado.Errores.Any(e => e.Campo == "FECHA_DETENCION"), "No se aplicaron los límites del periodo recibido");
+        });
+    }
+}
 Environment.ExitCode = fallos == 0 ? 0 : 1;
