@@ -1,5 +1,5 @@
 using System.Globalization;
-using System.Text.Json;
+using System.Data;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using EficienciaMinisterialAPI.Models;
@@ -73,7 +73,27 @@ public sealed class CruceRndService(IConfiguration configuration, ILogger<CruceR
         }
         var fuenteSql = $"SELECT {string.Join(", ", campos)} FROM [dbo].[{tabla}]";
         var filtroAdministrativas = fa ? "1 = 1" : "r.FOLIO_DETENIDO NOT LIKE '%/IA/%' AND r.FOLIO_DETENIDO NOT LIKE '%/AI/%'";
-        var solicitudes = JsonSerializer.Serialize(registros.Select(r => new { fila = r.Fila, folio = ExcelCargaService.Normalizar(r.FolioRnd), nombre = ExcelCargaService.Normalizar(r.NombreDetenido), fecha = r.FechaDetencion.Date }));
+        // #solicitud vive sólo en tempdb para esta conexión; no escribe tablas de RND.
+        await db.ExecuteAsync("CREATE TABLE #solicitud(fila int PRIMARY KEY, folio nvarchar(40), nombre nvarchar(300), fecha date);", transaction: tx);
+        using var solicitudes = new DataTable();
+        solicitudes.Columns.Add("fila", typeof(int));
+        solicitudes.Columns.Add("folio", typeof(string));
+        solicitudes.Columns.Add("nombre", typeof(string));
+        solicitudes.Columns.Add("fecha", typeof(DateTime));
+        foreach(var registro in registros)
+        {
+            solicitudes.Rows.Add(registro.Fila, ExcelCargaService.Normalizar(registro.FolioRnd),
+                ExcelCargaService.Normalizar(registro.NombreDetenido), registro.FechaDetencion.Date);
+        }
+        using(var copia = new SqlBulkCopy(db, SqlBulkCopyOptions.Default, tx))
+        {
+            copia.DestinationTableName = "#solicitud";
+            foreach(DataColumn columna in solicitudes.Columns)
+            {
+                copia.ColumnMappings.Add(columna.ColumnName, columna.ColumnName);
+            }
+            await copia.WriteToServerAsync(solicitudes);
+        }
         var nombrePrSql = "TRIM(CONCAT_WS(' ', NULLIF(TRIM(r.NOMBRE_PR), ''), NULLIF(TRIM(r.APELLIDO_PATERNO_PR), ''), NULLIF(TRIM(r.APELLIDO_MATERNO_PR), '')))";
         nombrePrSql = $"REPLACE(REPLACE(REPLACE({nombrePrSql}, CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' ')";
         for(var paso = 0; paso < 9; paso++)
@@ -82,9 +102,6 @@ public sealed class CruceRndService(IConfiguration configuration, ILogger<CruceR
         }
         // El identificador interpolado procede exclusivamente de sys.tables y del formato estricto validado arriba.
         var candidatos = await db.QueryAsync<FilaRnd>($"""
-            CREATE TABLE #solicitud(fila int PRIMARY KEY, folio nvarchar(40), nombre nvarchar(300), fecha date);
-            INSERT #solicitud SELECT fila, folio, nombre, fecha FROM OPENJSON(@solicitudes)
-            WITH(fila int, folio nvarchar(40), nombre nvarchar(300), fecha date);
             SELECT DISTINCT s.fila, CONVERT(nvarchar(40), r.FOLIO_DETENIDO) AS Folio,
                 CONVERT(nvarchar(80), r.ID_DETENIDO) AS IdDetenido,
                 CONVERT(nvarchar(80), r.ID_DETENCION) AS IdDetencion,
@@ -114,7 +131,7 @@ public sealed class CruceRndService(IConfiguration configuration, ILogger<CruceR
                 AND {nombrePrSql} COLLATE Latin1_General_100_CI_AI = s.nombre
             WHERE {filtroAdministrativas};
             DROP TABLE #solicitud;
-            """, new { solicitudes }, tx, commandTimeout: 180);
+            """, transaction: tx, commandTimeout: 180);
         var filas = candidatos.GroupBy(c => c.Fila).ToDictionary(g => g.Key,
             g => g.Where(c => !g.Any(x => x.PorFolio) || c.PorFolio).Select(c => new CoincidenciaRnd(c.Folio, c.IdDetenido, c.IdDetencion, c.IdPuesta,
                 c.NombrePr, c.NombreMp, c.FechaDetencion, c.Entidad, c.Fiscalia, c.Fuero)).Distinct().ToList());
