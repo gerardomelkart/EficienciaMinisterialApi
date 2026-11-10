@@ -140,6 +140,12 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         {
             return BadRequest(new { mensaje = "El nombre del archivo es demasiado largo." });
         }
+        var duplicados = await cargas.ValidarDuplicadosAsync(idPeriodo, resultado.Registros);
+        if(duplicados.Count > 0)
+        {
+            return Ok(new { valido = false, idCarga = (Guid?)null, totalRegistros = resultado.Registros.Count,
+                errores = duplicados, avisos = resultado.Avisos });
+        }
         var cruce = await rnd.CruzarAsync(resultado.Registros);
         var cruces = resultado.Registros.Select(r => CruceRndService.Detallar(r, cruce)).ToList();
         var detallePorFila = cruces.ToDictionary(c => c.Fila!.Value, c => c.Cruce);
@@ -178,8 +184,12 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
     [HttpPost("cargas/confirmar")]
     public async Task<IActionResult> Confirmar(ConfirmarCargaRequest request)
     {
-        var carga = await cargas.ConfirmarAsync(Usuario, request.IdCarga, request.AceptaNoLocalizados);
-        return carga == null ? NotFound() : Ok(carga);
+        var resultado = await cargas.ConfirmarAsync(Usuario, request.IdCarga, request.AceptaNoLocalizados);
+        if(resultado.Mensaje != null)
+        {
+            return Conflict(new { codigo = "VALIDACION_ENTREGA", mensaje = resultado.Mensaje, errores = resultado.Errores ?? [] });
+        }
+        return resultado.Carga == null ? NotFound() : Ok(resultado.Carga);
     }
 
     [HttpGet("cargas")]

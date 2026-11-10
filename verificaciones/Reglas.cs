@@ -233,14 +233,15 @@ Probar("Acuse PDF previo y definitivo se generan en memoria", () =>
     var carga = new CargaInfo { Id = Guid.NewGuid(), Institucion = "SSPC", Estado = "VALIDADA", NombreArchivo = "Prueba de carga.xlsx", PeriodoInicio = new DateTime(2026, 10, 1), PeriodoFin = new DateTime(2026, 10, 15), TotalRegistros = 1998, CreadoUtc = new DateTime(2026, 11, 9, 20, 0, 0) };
     var previo = AcuseCargaService.Crear(carga);
     Ver(System.Text.Encoding.Latin1.GetString(previo).StartsWith("%PDF-1.4"), "No se generó un PDF");
-    Ver(AcuseCargaService.NombreArchivo(carga, "Acuse", "pdf").Contains("PREVIO"), "El previo parece definitivo");
+    Ver(AcuseCargaService.NombreArchivo(carga, "Acuse", "pdf").Contains("Vista_previa"), "El previo parece definitivo");
+    Ver(AcuseCargaService.NombreArchivo(carga, "Acuse", "pdf") == "Acuse_PrimerRespondiente_01-10-2026_al_15-10-2026_Vista_previa.pdf", "El nombre previo expone datos técnicos");
     carga.Estado = "CONFIRMADA";
     carga.Folio = "EM-PR-2026-1";
     carga.ConfirmadoUtc = carga.CreadoUtc;
     var definitivo = AcuseCargaService.Crear(carga);
     var texto = System.Text.Encoding.Latin1.GetString(definitivo);
     Ver(texto.Contains("EM-PR-2026-1") && texto.Contains("14:00:00"), "Falta folio o la hora no corresponde a México");
-    Ver(AcuseCargaService.NombreArchivo(carga, "Acuse", "pdf") == "Acuse_PrimerRespondiente_SSPC_20261001-20261015_EM-PR-2026-1.pdf", "Nombre incorrecto");
+    Ver(AcuseCargaService.NombreArchivo(carga, "Acuse", "pdf") == "Acuse_PrimerRespondiente_01-10-2026_al_15-10-2026.pdf", "Nombre incorrecto");
     var carpeta = Environment.GetEnvironmentVariable("EM_QA_SALIDA");
     if(!string.IsNullOrWhiteSpace(carpeta))
     {

@@ -116,25 +116,87 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
         return await db.QuerySingleOrDefaultAsync<CargaInfo>($"SELECT {Columnas} FROM primer_respondiente.carga c WHERE c.id = @id AND c.estado = 'CONFIRMADA' AND {Filtro(usuario)}", new { id, usuario.Institucion, usuario.Ambito, usuario.Entidad });
     }
 
-    public async Task<CargaInfo?> ConfirmarAsync(UsuarioInfo usuario, Guid id, bool aceptaNoLocalizados = false)
+    public async Task<List<ErrorFila>> ValidarDuplicadosAsync(int idPeriodo, IReadOnlyList<RegistroCarga> registros)
+    {
+        await using var db = await factory.AbrirAsync();
+        await using var tx = (SqlTransaction)await db.BeginTransactionAsync();
+        var periodo = await db.QuerySingleOrDefaultAsync<PeriodoInfo>("SELECT id, inicio, fin FROM primer_respondiente.periodo WHERE id = @idPeriodo", new { idPeriodo }, tx);
+        if(periodo == null) throw new ArgumentException("El periodo no existe.");
+        await db.ExecuteAsync("""
+            SELECT TOP (0) fila, corporacion, folio_rnd, fecha_detencion, nombre_detenido
+            INTO #nuevos FROM primer_respondiente.registro;
+            """, transaction: tx);
+        using var datos = PrepararRegistros(Guid.Empty, registros);
+        using(var copia = new SqlBulkCopy(db, SqlBulkCopyOptions.Default, tx))
+        {
+            copia.DestinationTableName = "#nuevos";
+            foreach(var columna in new[] { "fila", "corporacion", "folio_rnd", "fecha_detencion", "nombre_detenido" })
+            {
+                copia.ColumnMappings.Add(columna, columna);
+            }
+            await copia.WriteToServerAsync(datos);
+        }
+        var errores = await ConsultarDuplicadosAsync(db, tx, "SELECT * FROM #nuevos", periodo, null);
+        await db.ExecuteAsync("DROP TABLE #nuevos;", transaction: tx);
+        await tx.CommitAsync();
+        return errores;
+    }
+
+    private static async Task<List<ErrorFila>> ConsultarDuplicadosAsync(SqlConnection db, SqlTransaction tx, string fuente, PeriodoInfo periodo, Guid? id)
+    {
+        // fuente es una consulta interna fija, nunca texto recibido del usuario.
+        var duplicados = await db.QueryAsync<DuplicadoInfo>($"""
+            SELECT nuevo.fila, anterior.folio AS FolioEntrega, anterior.periodo_inicio AS Inicio,
+                anterior.periodo_fin AS Fin, nuevo.folio_rnd AS FolioRnd, nuevo.nombre_detenido AS Nombre
+            FROM ({fuente}) nuevo
+            CROSS APPLY (
+                SELECT TOP (1) c.folio, c.periodo_inicio, c.periodo_fin
+                FROM primer_respondiente.registro previo
+                JOIN primer_respondiente.carga c ON c.id = previo.id_carga
+                WHERE c.estado = 'CONFIRMADA' AND c.vigente = 1
+                    AND (c.id_periodo <> @IdPeriodo OR (c.id_periodo IS NULL AND (c.periodo_inicio <> @Inicio OR c.periodo_fin <> @Fin)))
+                    AND previo.corporacion = nuevo.corporacion AND previo.fecha_detencion = nuevo.fecha_detencion
+                    AND ((nuevo.folio_rnd <> '' AND previo.folio_rnd = nuevo.folio_rnd
+                        AND (nuevo.nombre_detenido = '' OR previo.nombre_detenido = '' OR previo.nombre_detenido = nuevo.nombre_detenido))
+                        OR (nuevo.nombre_detenido <> '' AND previo.nombre_detenido = nuevo.nombre_detenido))
+                ORDER BY c.confirmado_utc DESC, c.id
+            ) anterior
+            ORDER BY nuevo.fila;
+            """, new { IdPeriodo = periodo.Id, periodo.Inicio, periodo.Fin, id }, tx, commandTimeout: 180);
+        return duplicados.Select(d => new ErrorFila(d.Fila, "REGISTRO_DUPLICADO",
+            $"Información ya reportada en la entrega {d.FolioEntrega}, periodo {d.Inicio:dd/MM/yyyy} al {d.Fin:dd/MM/yyyy}. Corrija el archivo; no se permite reportarla nuevamente.",
+            string.IsNullOrWhiteSpace(d.FolioRnd) ? d.Nombre : d.FolioRnd)).ToList();
+    }
+
+    private sealed class DuplicadoInfo
+    {
+        public int Fila { get; set; }
+        public string FolioEntrega { get; set; } = "";
+        public DateTime Inicio { get; set; }
+        public DateTime Fin { get; set; }
+        public string FolioRnd { get; set; } = "";
+        public string Nombre { get; set; } = "";
+    }
+
+    public async Task<ResultadoConfirmacionCarga> ConfirmarAsync(UsuarioInfo usuario, Guid id, bool aceptaNoLocalizados = false)
     {
         await using var db = await factory.AbrirAsync();
         await using var tx = (SqlTransaction)await db.BeginTransactionAsync();
         var periodoId = await db.ExecuteScalarAsync<int?>("SELECT id_periodo FROM primer_respondiente.carga WHERE id = @id", new { id }, tx);
-        if(periodoId == null) return null;
+        if(periodoId == null) return new(null);
         var bloqueoPeriodo = await db.ExecuteScalarAsync<int>("""
             DECLARE @r int;
             EXEC @r = sys.sp_getapplock @Resource=@recurso, @LockMode='Exclusive', @LockOwner='Transaction', @LockTimeout=10000;
             SELECT @r;
             """, new { recurso = "EM-CONFIRMAR-ENTREGA" }, tx);
-        if(bloqueoPeriodo < 0) throw new ArgumentException("Hay otra entrega en curso para esta quincena. Intente nuevamente.");
+        if(bloqueoPeriodo < 0) return new(null, Mensaje: "Hay otra entrega en curso para esta quincena. Intente nuevamente.");
         var estado = await db.QuerySingleOrDefaultAsync<string>("""
             SELECT estado FROM primer_respondiente.carga WITH (UPDLOCK, HOLDLOCK)
             WHERE id = @id AND id_usuario = @UsuarioId AND (@EsSuper = 1 OR institucion = @Institucion)
             """, new { id, UsuarioId = usuario.Id, usuario.Institucion, EsSuper = usuario.Rol == "SUPER_USUARIO" }, tx);
         if(estado == null)
         {
-            return null;
+            return new(null);
         }
         // Revalidar el alcance actual: pudo cambiar desde la carga.
         var fuera = await db.ExecuteScalarAsync<int>("""
@@ -143,19 +205,19 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
             """, new { id, usuario.Ambito, usuario.Entidad }, tx);
         if(fuera > 0)
         {
-            throw new ArgumentException("La carga queda fuera del alcance actual del usuario.");
+            return new(null, Mensaje: "La carga queda fuera del alcance actual del usuario.");
         }
         if(estado == "VALIDADA")
         {
             var periodo = await db.QuerySingleAsync<PeriodoInfo>("SELECT id, inicio, fin FROM primer_respondiente.periodo WHERE id = @periodoId", new { periodoId }, tx);
             if(usuario.Rol != "SUPER_USUARIO" && await TieneEntregaAsync(db, tx, usuario.Institucion, periodo))
             {
-                throw new ArgumentException("La corporación ya tiene una entrega confirmada para esta quincena. No puede realizar otra carga inicial.");
+                return new(null, Mensaje: "La corporación ya tiene una entrega confirmada para esta quincena. No puede realizar otra carga inicial.");
             }
             var noLocalizados = await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM primer_respondiente.registro WHERE id_carga = @id AND estado_cruce <> 'LOCALIZADO'", new { id }, tx);
             if(noLocalizados > 0 && !aceptaNoLocalizados)
             {
-                throw new ArgumentException($"Debe aceptar expresamente los {noLocalizados} registros no localizados en RND.");
+                return new(null, Mensaje: $"Debe aceptar expresamente los {noLocalizados} registros no localizados en RND.");
             }
             // Serializa la confirmación del mismo archivo, incluso entre usuarios distintos.
             var recurso = await db.ExecuteScalarAsync<string>("""
@@ -170,7 +232,7 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
                 """, new { recurso }, tx);
             if(bloqueo < 0)
             {
-                throw new ArgumentException("Hay otra confirmación en curso. Intente nuevamente.");
+                return new(null, Mensaje: "Hay otra confirmación en curso. Intente nuevamente.");
             }
             var duplicada = await db.ExecuteScalarAsync<bool>("""
                 SELECT CAST(CASE WHEN EXISTS(
@@ -183,7 +245,7 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
                 """, new { id }, tx);
             if(duplicada)
             {
-                throw new ArgumentException("Este archivo ya fue confirmado para la corporación y periodo seleccionados. Consulte la carga existente.");
+                return new(null, Mensaje: "Este archivo ya fue confirmado para la corporación y periodo seleccionados. Consulte la carga existente.");
             }
             var habilitado = await db.ExecuteScalarAsync<bool>("""
                 SELECT CAST(CASE WHEN EXISTS(
@@ -194,24 +256,13 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
                 """, new { id }, tx);
             if(!habilitado)
             {
-                throw new ArgumentException("El periodo no está habilitado. Vuelva a validar el archivo con un periodo disponible.");
+                return new(null, Mensaje: "El periodo no está habilitado. Vuelva a validar el archivo con un periodo disponible.");
             }
-            var repetidos = await db.ExecuteScalarAsync<int>("""
-                SELECT COUNT(*) FROM primer_respondiente.registro nuevo
-                WHERE nuevo.id_carga = @id AND EXISTS(
-                    SELECT 1 FROM primer_respondiente.registro previo
-                    JOIN primer_respondiente.carga c ON c.id = previo.id_carga
-                    WHERE c.estado = 'CONFIRMADA' AND c.vigente = 1 AND c.id_periodo <> @periodoId
-                        AND previo.corporacion = nuevo.corporacion
-                        AND previo.fecha_detencion = nuevo.fecha_detencion
-                        AND ((nuevo.folio_rnd <> '' AND previo.folio_rnd = nuevo.folio_rnd
-                            AND (nuevo.nombre_detenido = '' OR previo.nombre_detenido = '' OR previo.nombre_detenido = nuevo.nombre_detenido))
-                            OR (nuevo.nombre_detenido <> '' AND previo.nombre_detenido = nuevo.nombre_detenido))
-                )
-                """, new { id, periodoId }, tx);
-            if(repetidos > 0)
+            var repetidos = await ConsultarDuplicadosAsync(db, tx,
+                "SELECT * FROM primer_respondiente.registro WHERE id_carga = @id", periodo, id);
+            if(repetidos.Count > 0)
             {
-                throw new ArgumentException("No es posible cargar información que ya fue previamente reportada en otro periodo.");
+                return new(null, "La carga no puede continuar: contiene información ya reportada en otro periodo.", repetidos);
             }
             await db.ExecuteAsync("""
                 UPDATE primer_respondiente.carga SET vigente = 0
@@ -244,7 +295,7 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
         }
         var carga = await db.QuerySingleAsync<CargaInfo>($"SELECT {Columnas} FROM primer_respondiente.carga WHERE id = @id", new { id }, tx);
         await tx.CommitAsync();
-        return carga;
+        return new(carga);
     }
 
     public async Task<CargaInfo?> ObtenerParaAcuseAsync(UsuarioInfo usuario, Guid id)

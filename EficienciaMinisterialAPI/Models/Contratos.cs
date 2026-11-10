@@ -91,3 +91,5 @@ public sealed record ExportarValidacionRequest(List<IncidenciaValidacion> Filas)
 
 public sealed record RegistroDescarga(string Corporacion, string FolioRnd, DateTime FechaDetencion,
     string AutoridadPuesta, string NombreDetenido, string Entidad, string TipoFuero);
+
+public sealed record ResultadoConfirmacionCarga(CargaInfo? Carga, string? Mensaje = null, List<ErrorFila>? Errores = null);

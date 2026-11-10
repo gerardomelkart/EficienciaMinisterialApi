@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text;
 
 using EficienciaMinisterialAPI.Models;
-using System.Text.RegularExpressions;
 
 namespace EficienciaMinisterialAPI.Services;
 
@@ -19,9 +18,8 @@ public sealed class AcuseCargaService
 
     public static string NombreArchivo(CargaInfo carga, string prefijo, string extension)
     {
-        string Seguro(string valor) => Regex.Replace(valor, "[^A-Za-z0-9_-]", "_");
-        var referencia = carga.Folio ?? "PREVIO_" + carga.Id.ToString("N")[..8];
-        return $"{prefijo}_PrimerRespondiente_{Seguro(carga.Institucion)}_{carga.PeriodoInicio:yyyyMMdd}-{carga.PeriodoFin:yyyyMMdd}_{Seguro(referencia)}.{extension}";
+        var estado = carga.Estado == "CONFIRMADA" ? "" : "_Vista_previa";
+        return $"{prefijo}_PrimerRespondiente_{carga.PeriodoInicio:dd-MM-yyyy}_al_{carga.PeriodoFin:dd-MM-yyyy}{estado}.{extension}";
     }
 
     public static byte[] Crear(CargaInfo carga)
