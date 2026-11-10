@@ -164,10 +164,31 @@ public sealed class CruceRndService(IConfiguration configuration, ILogger<CruceR
         await db.ExecuteAsync("DROP TABLE #solicitud;", transaction: tx);
         var filas = candidatos.GroupBy(c => c.Fila).ToDictionary(g => g.Key,
             g => g.Select(c => new CoincidenciaRnd(c.Folio, c.IdDetenido, c.IdDetencion, c.IdPuesta,
-                c.NombrePr, c.NombreMp, c.FechaDetencion, c.Entidad, c.Fiscalia, c.Fuero)).Distinct().ToList());
+                c.NombrePr, c.NombreMp, c.FechaDetencion, c.Entidad, c.Fiscalia, c.Fuero, c.PorFolio ? "Folio" : "Nombre PR + fecha")).Distinct().ToList());
         await tx.CommitAsync();
-        logger.LogInformation("Cruce RND con {Tabla}: filas consultadas {Filas}; localizadas {Localizadas}", tabla, registros.Count, filas.Count);
+        logger.LogInformation("Cruce RND con {Tabla}: filas {Filas}; por folio {PorFolio}; por nombre PR y fecha {PorNombre}; sin coincidencia {SinCoincidencia}",
+            tabla, registros.Count, filas.Count(f => f.Value.Any(c => c.Metodo == "Folio")),
+            filas.Count(f => f.Value.Any(c => c.Metodo == "Nombre PR + fecha")), registros.Count - filas.Count);
         return new ResultadoCruceRnd(tabla, DateTime.ParseExact(tabla.Substring(12, 8), "yyyyMMdd", CultureInfo.InvariantCulture), filas);
+    }
+
+    public static IncidenciaValidacion Detallar(RegistroCarga registro, ResultadoCruceRnd resultado)
+    {
+        var normal = resultado.Filas.GetValueOrDefault(registro.Fila) ?? [];
+        var fa = resultado.Administrativas.GetValueOrDefault(registro.Fila) ?? [];
+        var coincidencias = normal.Count > 0 ? normal : fa;
+        var estado = normal.Count > 0 ? "Localizado en RND normal" : fa.Count > 0 ? "Localizado en FA (no admisible)" : "No localizado";
+        var fuente = normal.Count > 0 ? resultado.Tabla : resultado.TablaFa;
+        var detalle = coincidencias.Count == 0
+            ? $"Sin coincidencias por folio ni por nombre PR y fecha. Normal: {resultado.Tabla}. FA: {resultado.TablaFa ?? "no consultada"}."
+            : $"Fuente: {fuente}. Coincidencias: {coincidencias.Count}.\n" + string.Join("\n", coincidencias.Select(c =>
+                $"Método: {c.Metodo}. Folio encontrado: {c.Folio}. Nombre PR: {c.NombrePr}. Nombre MP: {c.NombreMp}. " +
+                $"Fecha: {c.FechaDetencion:dd/MM/yyyy}. Entidad: {c.Entidad}. Fiscalía: {c.Fiscalia}. " +
+                $"ID detenido: {c.IdDetenido}. ID detención: {c.IdDetencion}. ID puesta: {c.IdPuesta}."));
+        if(normal.Count > 0) detalle += "\nFA no consultada para esta fila: ya se localizó en la serie normal.";
+        if(fa.Count > 0) detalle += $"\nSin coincidencia en normal: {resultado.Tabla}.";
+        return new IncidenciaValidacion("Cruce", registro.Fila, "RND", estado,
+            $"Folio: {registro.FolioRnd}; nombre: {registro.NombreDetenido}; fecha: {registro.FechaDetencion:dd/MM/yyyy}", detalle);
     }
 
     private sealed class RangoFechas

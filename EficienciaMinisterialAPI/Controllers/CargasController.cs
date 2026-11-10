@@ -141,16 +141,20 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
             return BadRequest(new { mensaje = "El nombre del archivo es demasiado largo." });
         }
         var cruce = await rnd.CruzarAsync(resultado.Registros);
+        var cruces = resultado.Registros.Select(r => CruceRndService.Detallar(r, cruce)).ToList();
+        var detallePorFila = cruces.ToDictionary(c => c.Fila!.Value, c => c.Cruce);
         foreach(var administrativa in cruce.Administrativas)
         {
             resultado.Errores.Add(new(administrativa.Key, "RND_FA",
                 $"Se localizó en la carga diaria de faltas administrativas {cruce.TablaFa}. No es posible reportar esta detención en eficiencia ministerial.",
-                resultado.Registros.First(r => r.Fila == administrativa.Key).FolioRnd));
+                resultado.Registros.First(r => r.Fila == administrativa.Key).NombreDetenido,
+                detallePorFila[administrativa.Key]));
         }
         if(resultado.Errores.Count > 0)
         {
             return Ok(new { valido = false, idCarga = (Guid?)null, totalRegistros = resultado.Registros.Count,
-                errores = resultado.Errores, avisos = resultado.Avisos });
+                errores = resultado.Errores.Select(e => e with { Cruce = detallePorFila.GetValueOrDefault(e.Fila) }),
+                avisos = resultado.Avisos.Select(e => e with { Cruce = detallePorFila.GetValueOrDefault(e.Fila) }), cruces });
         }
         foreach(var registro in resultado.Registros)
         {
@@ -165,7 +169,9 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
             }
         }
         var id = await cargas.GuardarAsync(Usuario, nombre, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)), idPeriodo, resultado.Registros, cruce);
-        return Ok(new { valido = true, idCarga = id, totalRegistros = resultado.Registros.Count, errores = resultado.Errores, avisos = resultado.Avisos });
+        return Ok(new { valido = true, idCarga = id, totalRegistros = resultado.Registros.Count,
+            errores = resultado.Errores.Select(e => e with { Cruce = detallePorFila.GetValueOrDefault(e.Fila) }),
+            avisos = resultado.Avisos.Select(e => e with { Cruce = detallePorFila.GetValueOrDefault(e.Fila) }), cruces });
     }
 
     [Authorize(Roles = "PRIMER_RESPONDIENTE,SUPER_USUARIO")]

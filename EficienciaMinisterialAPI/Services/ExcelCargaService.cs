@@ -52,7 +52,7 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
     {
         using var libro = new XLWorkbook();
         var hoja = libro.AddWorksheet("Validación");
-        string[] columnas = ["TIPO", "FILA_EXCEL", "CAMPO", "VALOR_EXCEL", "DETALLE"];
+        string[] columnas = ["TIPO", "FILA_EXCEL", "CAMPO", "VALOR_EXCEL", "DETALLE", "RESULTADO_CRUCE"];
         for(var columna = 0; columna < columnas.Length; columna++)
         {
             hoja.Cell(1, columna + 1).Value = columnas[columna];
@@ -68,6 +68,8 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
             hoja.Cell(indice + 2, 3).Value = fila.Campo;
             hoja.Cell(indice + 2, 4).Value = fila.Valor ?? "";
             hoja.Cell(indice + 2, 5).Value = fila.Mensaje;
+            var cruce = fila.Cruce ?? "";
+            hoja.Cell(indice + 2, 6).Value = cruce.Length > 32767 ? cruce[..32700] + " [Detalle truncado por el límite de Excel; consulte la pantalla]" : cruce;
         }
         hoja.Range(1, 1, filas.Count + 1, columnas.Length).CreateTable();
         hoja.SheetView.FreezeRows(1);
@@ -78,6 +80,8 @@ public sealed class ExcelCargaService(CatalogoRepository catalogos, LimitesCarga
         hoja.Column(4).Style.Alignment.WrapText = true;
         hoja.Column(5).Width = 100;
         hoja.Column(5).Style.Alignment.WrapText = true;
+        hoja.Column(6).Width = 100;
+        hoja.Column(6).Style.Alignment.WrapText = true;
         using var salida = new MemoryStream();
         libro.SaveAs(salida);
         return salida.ToArray();

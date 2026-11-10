@@ -34,6 +34,25 @@ Probar("RND FA usa exclusivamente la última tabla válida de su propia serie", 
     Ver(CruceRndService.UltimaTabla(tablas, new DateTime(2026, 11, 9), true) == "tablero_rnd_20261108_fa", "FA debe elegir su fecha independiente de normal");
     Ver(CruceRndService.UltimaTabla(["tablero_rnd_20261109"], new DateTime(2026, 11, 9), true) == null, "No se permite usar normal como FA");
 });
+Probar("Detalle del cruce conserva método, fuente e identificadores y distingue FA", () =>
+{
+    var registro = new RegistroCarga(2, "SSPC", "", new DateTime(2026, 10, 5), "", "PERSONA DE PRUEBA", 9, "");
+    var coincidencia = new CoincidenciaRnd("FOLIO-PRUEBA", "10", "20", "30", "PERSONA DE PRUEBA", "NOMBRE MP", registro.FechaDetencion,
+        "CIUDAD DE MEXICO", "FISCALIA", "FC", "Nombre PR + fecha");
+    var cruce = new ResultadoCruceRnd("tablero_rnd_20261109", new DateTime(2026, 11, 9), new())
+    {
+        TablaFa = "tablero_rnd_20261108_fa", Administrativas = new() { [2] = [coincidencia] }
+    };
+    var detalle = CruceRndService.Detallar(registro, cruce);
+    Ver(detalle.Mensaje.Contains("FA (no admisible)"), "No distingue FA");
+    Ver(detalle.Cruce!.Contains("Nombre PR + fecha") && detalle.Cruce.Contains("tablero_rnd_20261108_fa")
+        && detalle.Cruce.Contains("FOLIO-PRUEBA") && detalle.Cruce.Contains("ID detenido: 10"), "Detalle incompleto");
+    using var libro = new XLWorkbook(new MemoryStream(ExcelCargaService.ExportarResultados([detalle])));
+    Ver(libro.Worksheet(1).Cell(1, 6).GetString() == "RESULTADO_CRUCE", "Falta columna Excel");
+    Ver(libro.Worksheet(1).Cell(2, 6).GetString() == detalle.Cruce, "El Excel perdió el detalle");
+    var sin = CruceRndService.Detallar(registro, cruce with { Administrativas = new() });
+    Ver(sin.Mensaje == "No localizado" && sin.Cruce!.Contains(cruce.TablaFa), "Falta trazabilidad de las tablas sin coincidencia");
+});
 UsuarioInfo usuario = new() { Institucion = "SEDENA", Ambito = "ESTATAL", Entidad = 9 };
 // Datos sintéticos exclusivos de estas pruebas. La aplicación obtiene los catálogos desde SQL.
 var catalogo = new CatalogoCaptura
