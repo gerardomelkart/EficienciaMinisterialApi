@@ -128,3 +128,18 @@ y acceso al bloqueo de aplicación `DBBridge_RND` (principal public). No usar el
 No guardar credenciales en appsettings ni en este repositorio. Aplicar las migraciones 007 a 009
 en EficienciaMinisterial_DEV, y desplegar API y front juntos. Todas las sesiones anteriores requieren login.
 La ausencia de conexión o una tabla con estructura incompatible impide validar; no hay cruce ficticio.
+
+
+### Copiar la conexión local del destino DBBridge sin escribir credenciales en el repositorio
+
+Desde PowerShell, con DBBridge actualizado en D:\CNI\DBBridge:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configurar-rnd-desde-dbbridge.ps1
+```
+
+Si DBBridge está en otra carpeta, agregar `-RutaDBBridge 'ruta-del-repositorio'`.
+El script lee únicamente los valores de CreateDestination en SqlConnections.cs, verifica la base RND
+y usa dotnet user-secrets set para el proyecto de API. No ejecuta código de DBBridge, no cambia ese
+repositorio y no muestra la contraseña. Reiniciar API después. Ambas series RND y RND_FA comparten
+esa conexión; no se configuran nombres de tablas con fecha en UserSecrets.

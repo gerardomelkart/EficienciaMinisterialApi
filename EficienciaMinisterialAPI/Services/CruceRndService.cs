@@ -8,15 +8,26 @@ namespace EficienciaMinisterialAPI.Services;
 
 public sealed class CruceRndService(IConfiguration configuration, ILogger<CruceRndService> logger)
 {
-    public static string? UltimaTabla(IEnumerable<string> tablas, DateTime hoy)
+    public static string? UltimaTabla(IEnumerable<string> tablas, DateTime hoy, bool fa = false)
     {
-        return tablas.Where(t => t.Length == 20 && t.StartsWith("tablero_rnd_", StringComparison.Ordinal)
-            && t[12..].All(char.IsAsciiDigit)
-            && DateTime.TryParseExact(t[12..], "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var fecha)
+        var sufijo = fa ? "_fa" : "";
+        return tablas.Where(t => t.Length == 20 + sufijo.Length && t.StartsWith("tablero_rnd_", StringComparison.Ordinal)
+            && t.EndsWith(sufijo, StringComparison.Ordinal)
+            && t.Substring(12, 8).All(char.IsAsciiDigit)
+            && DateTime.TryParseExact(t.Substring(12, 8), "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var fecha)
             && fecha <= hoy.Date).OrderDescending(StringComparer.Ordinal).FirstOrDefault();
     }
 
     public async Task<ResultadoCruceRnd> CruzarAsync(IReadOnlyList<RegistroCarga> registros)
+    {
+        var normal = await CruzarSerieAsync(registros, false);
+        var pendientes = registros.Where(r => !normal.Filas.ContainsKey(r.Fila)).ToList();
+        if(pendientes.Count == 0) return normal;
+        var administrativas = await CruzarSerieAsync(pendientes, true);
+        return normal with { Administrativas = administrativas.Filas, TablaFa = administrativas.Tabla };
+    }
+
+    private async Task<ResultadoCruceRnd> CruzarSerieAsync(IReadOnlyList<RegistroCarga> registros, bool fa)
     {
         var cadena = configuration.GetConnectionString("RndDestino");
         if(string.IsNullOrWhiteSpace(cadena))
@@ -33,20 +44,35 @@ public sealed class CruceRndService(IConfiguration configuration, ILogger<CruceR
         // Mismo recurso y base de DBBridge: una carga no se consulta antes de su commit.
         var bloqueo = await db.ExecuteScalarAsync<int>("""
             DECLARE @r int;
-            EXEC @r = sys.sp_getapplock @Resource='DBBridge_RND', @LockMode='Shared',
+            EXEC @r = sys.sp_getapplock @Resource=@recurso, @LockMode='Shared',
                 @LockOwner='Transaction', @LockTimeout=30000;
             SELECT @r;
-            """, transaction: tx, commandTimeout: 40);
+            """, new { recurso = fa ? "DBBridge_RND_FA" : "DBBridge_RND" }, transaction: tx, commandTimeout: 40);
         if(bloqueo < 0) throw new InvalidOperationException("La carga diaria de RND está en proceso. Intente nuevamente.");
         var tablas = await db.QueryAsync<string>("SELECT name FROM sys.tables WHERE schema_id = SCHEMA_ID('dbo') AND name LIKE 'tablero[_]rnd[_]%'", transaction: tx);
         var hoy = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/Mexico_City").Date;
-        var tabla = UltimaTabla(tablas, hoy) ?? throw new InvalidOperationException("No existe una carga diaria RND válida en el destino.");
+        var tabla = UltimaTabla(tablas, hoy, fa) ?? throw new InvalidOperationException("No existe una carga diaria válida para la serie RND solicitada en el destino.");
         var columnas = (await db.QueryAsync<string>("SELECT name FROM sys.columns WHERE object_id = OBJECT_ID(@objeto)", new { objeto = "dbo." + tabla }, tx)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         string[] requeridas = ["FOLIO_DETENIDO", "ID_DETENIDO", "ID_DETENCION", "ID_PUESTA_DISPOSICION", "NOMBRE_PR", "APELLIDO_PATERNO_PR", "APELLIDO_MATERNO_PR", "NOMBRE_MP", "APELLIDO_PATERNO_MP", "APELLIDO_MATERNO_MP", "FECHA_DETENCION", "ENTIDAD_DETENCION", "NOMBRE_FISCALIA", "NOMBRE_FUERO"];
-        if(requeridas.Any(c => !columnas.Contains(c)))
+        // FA conserva nombres históricos en algunas tablas: DBBridge copia por posición.
+        var equivalencias = new Dictionary<string, string>
         {
-            throw new InvalidOperationException("La tabla diaria más reciente no tiene la estructura RND vigente de DBBridge.");
+            ["NOMBRE_PR"] = "NOMBRE", ["APELLIDO_PATERNO_PR"] = "APELLIDO_PATERNO",
+            ["APELLIDO_MATERNO_PR"] = "APELLIDO_MATERNO", ["ENTIDAD_DETENCION"] = "ENTIDAD"
+        };
+        var campos = new List<string>();
+        foreach(var requerida in requeridas)
+        {
+            var origen = columnas.Contains(requerida) ? requerida
+                : equivalencias.TryGetValue(requerida, out var anterior) && columnas.Contains(anterior) ? anterior : null;
+            if(origen == null)
+            {
+                throw new InvalidOperationException($"La tabla {tabla} no tiene la columna requerida {requerida}.");
+            }
+            campos.Add($"[{origen}] AS [{requerida}]");
         }
+        var fuenteSql = $"SELECT {string.Join(", ", campos)} FROM [dbo].[{tabla}]";
+        var filtroAdministrativas = fa ? "1 = 1" : "r.FOLIO_DETENIDO NOT LIKE '%/IA/%' AND r.FOLIO_DETENIDO NOT LIKE '%/AI/%'";
         var solicitudes = JsonSerializer.Serialize(registros.Select(r => new { fila = r.Fila, folio = ExcelCargaService.Normalizar(r.FolioRnd), nombre = ExcelCargaService.Normalizar(r.NombreDetenido), fecha = r.FechaDetencion.Date }));
         var nombrePrSql = "TRIM(CONCAT_WS(' ', NULLIF(TRIM(r.NOMBRE_PR), ''), NULLIF(TRIM(r.APELLIDO_PATERNO_PR), ''), NULLIF(TRIM(r.APELLIDO_MATERNO_PR), '')))";
         nombrePrSql = $"REPLACE(REPLACE(REPLACE({nombrePrSql}, CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' ')";
@@ -69,9 +95,9 @@ public sealed class CruceRndService(IConfiguration configuration, ILogger<CruceR
                 COALESCE(r.ENTIDAD_DETENCION, '') AS Entidad,
                 COALESCE(r.NOMBRE_FISCALIA, '') AS Fiscalia, COALESCE(r.NOMBRE_FUERO, '') AS Fuero,
                 CAST(CASE WHEN s.folio <> '' AND TRIM(r.FOLIO_DETENIDO) COLLATE Latin1_General_100_CI_AI = s.folio THEN 1 ELSE 0 END AS bit) AS PorFolio
-            FROM [dbo].[{tabla}] r
+            FROM ({fuenteSql}) r
             JOIN #solicitud s ON s.folio <> '' AND TRIM(r.FOLIO_DETENIDO) COLLATE Latin1_General_100_CI_AI = s.folio
-            WHERE r.FOLIO_DETENIDO NOT LIKE '%/IA/%' AND r.FOLIO_DETENIDO NOT LIKE '%/AI/%'
+            WHERE {filtroAdministrativas}
             UNION ALL
             SELECT DISTINCT s.fila, CONVERT(nvarchar(40), r.FOLIO_DETENIDO) AS Folio,
                 CONVERT(nvarchar(80), r.ID_DETENIDO) AS IdDetenido,
@@ -83,10 +109,10 @@ public sealed class CruceRndService(IConfiguration configuration, ILogger<CruceR
                 COALESCE(r.ENTIDAD_DETENCION, '') AS Entidad,
                 COALESCE(r.NOMBRE_FISCALIA, '') AS Fiscalia, COALESCE(r.NOMBRE_FUERO, '') AS Fuero,
                 CAST(CASE WHEN s.folio <> '' AND TRIM(r.FOLIO_DETENIDO) COLLATE Latin1_General_100_CI_AI = s.folio THEN 1 ELSE 0 END AS bit) AS PorFolio
-            FROM [dbo].[{tabla}] r
+            FROM ({fuenteSql}) r
             JOIN #solicitud s ON s.nombre <> '' AND TRY_CONVERT(date, r.FECHA_DETENCION) = s.fecha
                 AND {nombrePrSql} COLLATE Latin1_General_100_CI_AI = s.nombre
-            WHERE r.FOLIO_DETENIDO NOT LIKE '%/IA/%' AND r.FOLIO_DETENIDO NOT LIKE '%/AI/%';
+            WHERE {filtroAdministrativas};
             DROP TABLE #solicitud;
             """, new { solicitudes }, tx, commandTimeout: 180);
         var filas = candidatos.GroupBy(c => c.Fila).ToDictionary(g => g.Key,
@@ -94,7 +120,7 @@ public sealed class CruceRndService(IConfiguration configuration, ILogger<CruceR
                 c.NombrePr, c.NombreMp, c.FechaDetencion, c.Entidad, c.Fiscalia, c.Fuero)).Distinct().ToList());
         await tx.CommitAsync();
         logger.LogInformation("Cruce RND con {Tabla}: filas consultadas {Filas}; localizadas {Localizadas}", tabla, registros.Count, filas.Count);
-        return new ResultadoCruceRnd(tabla, DateTime.ParseExact(tabla[12..], "yyyyMMdd", CultureInfo.InvariantCulture), filas);
+        return new ResultadoCruceRnd(tabla, DateTime.ParseExact(tabla.Substring(12, 8), "yyyyMMdd", CultureInfo.InvariantCulture), filas);
     }
 
     private sealed class FilaRnd

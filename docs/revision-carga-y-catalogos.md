@@ -127,3 +127,16 @@ para impedir bypass por solicitudes directas y por validaciones simultáneas.
 El superusuario conserva la facultad de reemplazar mientras la quincena permanezca abierta;
 el primer respondiente no reemplaza una entrega mediante otra carga inicial.
 El front actualiza el catálogo tras confirmar. No requiere nueva migración SQL.
+
+
+## Ampliación de cruce a la serie diaria de faltas administrativas
+
+Se corrige la exclusión anterior de toda consulta a RND_FA: excluir estas detenciones del ejercicio
+requiere identificar también las que se localizan allí por nombre, aunque el Excel no tenga IA/AI.
+Se consulta la última tabla válida independiente de cada serie. Primero normal; para no localizados,
+FA por folio y luego nombre PR/fecha. Una coincidencia exclusiva en FA es error de carga y rechaza
+el archivo completo, indicando tabla fuente. FA no sustituye una coincidencia normal ni se envía a
+fiscalías. Si una serie requerida falta o falla, no se trata como una búsqueda sin resultados.
+Cada lectura comparte el bloqueo DBBridge de su proceso: DBBridge_RND o DBBridge_RND_FA.
+Se admite el nombre histórico NOMBRE/APELLIDO_PATERNO/APELLIDO_MATERNO/ENTIDAD cuando la tabla
+FA conserva ese contrato por la copia ordinal de DBBridge. No se agregan credenciales al código.

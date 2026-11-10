@@ -141,6 +141,17 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
             return BadRequest(new { mensaje = "El nombre del archivo es demasiado largo." });
         }
         var cruce = await rnd.CruzarAsync(resultado.Registros);
+        foreach(var administrativa in cruce.Administrativas)
+        {
+            resultado.Errores.Add(new(administrativa.Key, "RND_FA",
+                $"Se localizó en la carga diaria de faltas administrativas {cruce.TablaFa}. No es posible reportar esta detención en eficiencia ministerial.",
+                resultado.Registros.First(r => r.Fila == administrativa.Key).FolioRnd));
+        }
+        if(resultado.Errores.Count > 0)
+        {
+            return Ok(new { valido = false, idCarga = (Guid?)null, totalRegistros = resultado.Registros.Count,
+                errores = resultado.Errores, avisos = resultado.Avisos });
+        }
         foreach(var registro in resultado.Registros)
         {
             var coincidencias = cruce.Filas.GetValueOrDefault(registro.Fila) ?? [];

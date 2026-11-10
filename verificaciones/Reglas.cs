@@ -28,6 +28,12 @@ Probar("RND elige última tabla diaria válida, excluye FA y fechas futuras", ()
     Ver(CruceRndService.UltimaTabla(["tablero_rnd_20261109_fa"], new DateTime(2026, 11, 9)) == null, "No debe usar FA como respaldo");
     Ver(CruceRndService.UltimaTabla(["tablero_rnd_20261107"], new DateTime(2026, 11, 9)) == "tablero_rnd_20261107", "Debe aceptar última carga disponible aunque falte la de hoy");
 });
+Probar("RND FA usa exclusivamente la última tabla válida de su propia serie", () =>
+{
+    var tablas = new[] { "tablero_rnd_20261109", "tablero_rnd_20261107_fa", "tablero_rnd_20261108_fa", "tablero_rnd_20261110_fa", "tablero_rnd_20260230_fa" };
+    Ver(CruceRndService.UltimaTabla(tablas, new DateTime(2026, 11, 9), true) == "tablero_rnd_20261108_fa", "FA debe elegir su fecha independiente de normal");
+    Ver(CruceRndService.UltimaTabla(["tablero_rnd_20261109"], new DateTime(2026, 11, 9), true) == null, "No se permite usar normal como FA");
+});
 UsuarioInfo usuario = new() { Institucion = "SEDENA", Ambito = "ESTATAL", Entidad = 9 };
 // Datos sintéticos exclusivos de estas pruebas. La aplicación obtiene los catálogos desde SQL.
 var catalogo = new CatalogoCaptura
