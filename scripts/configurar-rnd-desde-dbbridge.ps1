@@ -27,8 +27,17 @@ $cadena['Application Name'] = 'EficienciaMinisterial cruce RND'
 $proyecto = Join-Path $PSScriptRoot '..\EficienciaMinisterialAPI\EficienciaMinisterialAPI.csproj'
 
 $valorConexion = $cadena.get_ConnectionString()
-& dotnet user-secrets set 'ConnectionStrings:RndDestino' $valorConexion --project $proyecto
-if ($LASTEXITCODE -ne 0) {
-    throw 'No fue posible guardar la conexión en UserSecrets.'
+# JSON por stdin evita que Windows PowerShell fragmente las comillas de la cadena SQL.
+$datos = @{ 'ConnectionStrings:RndDestino' = $valorConexion } | ConvertTo-Json -Compress
+$codificacionAnterior = $OutputEncoding
+try {
+    $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    $datos | & dotnet user-secrets set --project $proyecto
+    if ($LASTEXITCODE -ne 0) {
+        throw 'No fue posible guardar la conexión en UserSecrets.'
+    }
+}
+finally {
+    $OutputEncoding = $codificacionAnterior
 }
 Write-Host 'Conexión destino RND configurada. Reinicie la API. La contraseña no se escribió en el repositorio.'
