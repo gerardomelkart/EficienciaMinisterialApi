@@ -48,7 +48,7 @@ public sealed class CatalogoRepository(SqlConnectionFactory factory, ILogger<Cat
         };
     }
 
-    public async Task<IEnumerable<PeriodoInfo>> ObtenerPeriodosAsync()
+    public async Task<IEnumerable<PeriodoInfo>> ObtenerPeriodosAsync(UsuarioInfo usuario)
     {
         var reloj = Stopwatch.StartNew();
         await using var db = await factory.AbrirAsync();
@@ -57,8 +57,14 @@ public sealed class CatalogoRepository(SqlConnectionFactory factory, ILogger<Cat
             DECLARE @hoy date = CONVERT(date, SYSUTCDATETIME() AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)');
             IF NOT EXISTS(SELECT 1 FROM primer_respondiente.periodo WHERE @hoy BETWEEN inicio AND fin)
                 EXEC primer_respondiente.GenerarPeriodos;
-            SELECT id, inicio, fin FROM primer_respondiente.periodo WHERE habilitado = 1 AND cerrado = 0 ORDER BY inicio DESC;
-            """);
+            SELECT p.id, p.inicio, p.fin FROM primer_respondiente.periodo p
+            WHERE p.habilitado = 1 AND p.cerrado = 0
+                AND (@PuedeReemplazar = 1 OR NOT EXISTS(
+                    SELECT 1 FROM primer_respondiente.carga c
+                    WHERE c.institucion = @Institucion AND c.estado = 'CONFIRMADA' AND c.vigente = 1
+                        AND (c.id_periodo = p.id OR (c.id_periodo IS NULL AND c.periodo_inicio = p.inicio AND c.periodo_fin = p.fin))))
+            ORDER BY p.inicio DESC;
+            """, new { usuario.Institucion, PuedeReemplazar = usuario.Rol == "SUPER_USUARIO" });
         logger.LogInformation("Catálogo de periodos: conexión {ConexionMs} ms; consulta {ConsultaMs} ms; total {TotalMs} ms", conexionMs, reloj.ElapsedMilliseconds - conexionMs, reloj.ElapsedMilliseconds);
         return periodos;
     }

@@ -102,6 +102,11 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         {
             return BadRequest(new { mensaje = "Seleccione un periodo quincenal habilitado." });
         }
+        var periodosDisponibles = await catalogos.ObtenerPeriodosAsync(Usuario);
+        if(!periodosDisponibles.Any(p => p.Id == idPeriodo))
+        {
+            return BadRequest(new { mensaje = "La quincena no está disponible o la corporación ya tiene una entrega confirmada. Actualice los periodos." });
+        }
         using var memoria = new MemoryStream();
         await archivo.CopyToAsync(memoria);
         var bytes = memoria.ToArray();

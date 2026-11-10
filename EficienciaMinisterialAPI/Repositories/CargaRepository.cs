@@ -24,6 +24,10 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
         {
             throw new ArgumentException("El periodo no existe, está deshabilitado o ya fue cerrado. Actualice la lista.");
         }
+        if(usuario.Rol != "SUPER_USUARIO" && await TieneEntregaAsync(db, tx, usuario.Institucion, periodo))
+        {
+            throw new ArgumentException("La corporación ya tiene una entrega confirmada para esta quincena. Actualice los periodos disponibles.");
+        }
         var id = Guid.NewGuid();
         await db.ExecuteAsync("""
             INSERT primer_respondiente.carga(id, id_usuario, institucion, nombre_archivo, sha256, id_periodo, periodo_inicio, periodo_fin, estado, total_registros)
@@ -62,6 +66,17 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
         await tx.CommitAsync();
         logger.LogInformation("Guardado de carga {IdCarga}: {Registros} registros; conexión {ConexionMs} ms; preparación {PreparacionMs} ms; lote {LoteMs} ms; total {TotalMs} ms", id, registros.Count, conexionMs, preparacionMs, loteMs, reloj.ElapsedMilliseconds);
         return id;
+    }
+
+    private static Task<bool> TieneEntregaAsync(SqlConnection db, SqlTransaction tx, string? institucion, PeriodoInfo periodo)
+    {
+        return db.ExecuteScalarAsync<bool>("""
+            SELECT CAST(CASE WHEN EXISTS(
+                SELECT 1 FROM primer_respondiente.carga
+                WHERE institucion = @institucion AND estado = 'CONFIRMADA' AND vigente = 1
+                    AND (id_periodo = @Id OR (id_periodo IS NULL AND periodo_inicio = @Inicio AND periodo_fin = @Fin))
+            ) THEN 1 ELSE 0 END AS bit)
+            """, new { institucion, periodo.Id, periodo.Inicio, periodo.Fin }, tx);
     }
 
     public static DataTable PrepararRegistros(Guid idCarga, IReadOnlyList<RegistroCarga> registros)
@@ -132,6 +147,11 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
         }
         if(estado == "VALIDADA")
         {
+            var periodo = await db.QuerySingleAsync<PeriodoInfo>("SELECT id, inicio, fin FROM primer_respondiente.periodo WHERE id = @periodoId", new { periodoId }, tx);
+            if(usuario.Rol != "SUPER_USUARIO" && await TieneEntregaAsync(db, tx, usuario.Institucion, periodo))
+            {
+                throw new ArgumentException("La corporación ya tiene una entrega confirmada para esta quincena. No puede realizar otra carga inicial.");
+            }
             var noLocalizados = await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM primer_respondiente.registro WHERE id_carga = @id AND estado_cruce <> 'LOCALIZADO'", new { id }, tx);
             if(noLocalizados > 0 && !aceptaNoLocalizados)
             {

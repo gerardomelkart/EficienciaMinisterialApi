@@ -116,3 +116,14 @@ marcados en preparación. Se conserva la prioridad de Excel sobre captura manual
 
 Se compila localmente API y Angular y se ejecutan las pruebas de reglas. La prueba real de lectura RND,
 persistencia SQL, concurrencia y tiempos queda pendiente en desarrollo con conexiones configuradas.
+
+
+## Corrección de periodos por corporación
+
+La carga inicial de primeros respondientes excluye quincenas con entrega confirmada vigente de su
+corporación. Incluye cargas históricas sin id_periodo, comparando fechas exactas. Los borradores no
+cierran la disponibilidad. La API vuelve a validar antes del cruce RND, al guardar y al confirmar,
+para impedir bypass por solicitudes directas y por validaciones simultáneas.
+El superusuario conserva la facultad de reemplazar mientras la quincena permanezca abierta;
+el primer respondiente no reemplaza una entrega mediante otra carga inicial.
+El front actualiza el catálogo tras confirmar. No requiere nueva migración SQL.

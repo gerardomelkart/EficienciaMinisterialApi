@@ -15,5 +15,5 @@ public sealed class CatalogosController(CatalogoRepository catalogos, LimitesCar
 
     [Authorize(Roles = "PRIMER_RESPONDIENTE,SUPER_USUARIO")]
     [HttpGet("carga")]
-    public async Task<IActionResult> Carga() => Ok(new { periodos = await catalogos.ObtenerPeriodosAsync(), limites });
+    public async Task<IActionResult> Carga() => Ok(new { periodos = await catalogos.ObtenerPeriodosAsync((UsuarioInfo)HttpContext.Items["Usuario"]!), limites });
 }
