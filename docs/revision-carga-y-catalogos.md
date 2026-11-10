@@ -79,3 +79,40 @@ No requiere una migración nueva. Sigue siendo necesario tener aplicada la migra
 ## Almacenamiento y acuses (2026-11-09)
 
 La entrega de acuses PDF y carga por lote retira el almacenamiento binario del Excel. Aplicar la migración 006; las filas y metadatos se conservan. Se mantiene la regla del cuestionario de permitir detenciones anteriores al periodo de entrega. El acuse previo no acredita recepción; el definitivo se genera después de confirmar y asignar folio. El cruce con RND continúa pendiente.
+
+
+## Entrega de acceso, cruce RND y control de quincenas — 9 de noviembre de 2026
+
+Se implementa el primer cambio obligatorio de contraseña; cuentas con acceso SUPER_USUARIO quedan exentas.
+Los tokens emitidos antes del cambio dejan de ser válidos al actualizar la versión de credenciales.
+Aplicar 007, 008 y 009, en ese orden, antes de actualizar API y front.
+
+El cruce ya se ejecuta al validar el Excel. Usa ConnectionStrings: RndDestino en la base RND del
+**destino** DBBridge. Descubre la tabla dbo.tablero_rnd_yyyyMMdd más reciente con fecha válida no futura.
+No consulta origen, linked server ni la serie _fa. Comparte el bloqueo DBBridge_RND durante la lectura
+para impedir consultar una carga en curso. No usa NOLOCK. Si falta tabla, estructura o conexión,
+no acepta el archivo como si el cruce hubiera ocurrido.
+
+Busca primero folio; si no aparece, usa nombre del primer respondiente normalizado y fecha de detención.
+Conserva todas las coincidencias distintas, IDs detenido/detención/puesta, nombres PR y MP, entidad,
+fecha, fiscalía y fuero. Conserva el original de corporación; persiste tabla y fecha de fuente,
+hora de consulta y coincidencias JSON por fila. Los no localizados requieren consentimiento expreso,
+validado en API y registrado en bitácora. No se generan aún plantillas de fiscalías.
+
+La confirmación rechaza SHA-256 ya confirmado para corporación/quincena y registros de esa corporación
+ya entregados en otros periodos; en un mismo periodo la última entrega reemplaza a la vigente,
+conservando el histórico y sus acuses. Un bloqueo transaccional serializa confirmaciones para evitar
+carreras de duplicados y del cierre. Una bandera marca folios duplicados entre las entregas vigentes.
+La quincena cierra al recibir todas las corporaciones esperadas desde catálogo (cuatro en la
+configuración acordada); la aclaración del chat sustituye a las tres del cuestionario.
+
+### Alcance que sigue abierto
+
+No se presenta esta entrega como implementación completa de las 60 preguntas. Faltan entregas en ceros,
+calendario de tres días hábiles, actualización quincenal de referencias RND, consolidación y asignación
+para fiscalías, plantillas históricas, validación/acuse de sus respuestas, cortes e indicadores reales.
+Las reglas no resueltas de fiscalías/adolescentes no se inventan. Los informes de la interfaz continúan
+marcados en preparación. Se conserva la prioridad de Excel sobre captura manual de seguimiento.
+
+Se compila localmente API y Angular y se ejecutan las pruebas de reglas. La prueba real de lectura RND,
+persistencia SQL, concurrencia y tiempos queda pendiente en desarrollo con conexiones configuradas.

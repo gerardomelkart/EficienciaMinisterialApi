@@ -10,7 +10,7 @@ public sealed class UsuarioRepository(SqlConnectionFactory factory)
     {
         await using var db = await factory.AbrirAsync();
         using var datos = await db.QueryMultipleAsync("""
-            SELECT id, usuario, nombre, activo FROM seguridad.usuario WHERE id = @id AND activo = 1;
+            SELECT id, usuario, nombre, activo, debe_cambiar_password AS CambioPasswordPendiente, version_credenciales AS VersionCredenciales FROM seguridad.usuario WHERE id = @id AND activo = 1;
             SELECT id, rol, institucion, ambito, entidad FROM seguridad.usuario_acceso WHERE id_usuario = @id ORDER BY id;
             """, new { id });
         var usuario = await datos.ReadSingleOrDefaultAsync<UsuarioInfo>();
@@ -30,7 +30,7 @@ public sealed class UsuarioRepository(SqlConnectionFactory factory)
     {
         await using var db = await factory.AbrirAsync();
         using var datos = await db.QueryMultipleAsync("""
-            SELECT id, usuario, nombre, activo FROM seguridad.usuario ORDER BY nombre;
+            SELECT id, usuario, nombre, activo, debe_cambiar_password AS CambioPasswordPendiente, version_credenciales AS VersionCredenciales FROM seguridad.usuario ORDER BY nombre;
             SELECT id, id_usuario AS IdUsuario, rol, institucion, ambito, entidad FROM seguridad.usuario_acceso ORDER BY id;
             """);
         var usuarios = (await datos.ReadAsync<UsuarioInfo>()).ToList();
@@ -63,6 +63,23 @@ public sealed class UsuarioRepository(SqlConnectionFactory factory)
             SELECT id, password_hash AS PasswordHash FROM seguridad.usuario
             WHERE usuario = @usuario AND activo = 1
             """, new { usuario });
+    }
+
+    public async Task<bool> CambiarPasswordAsync(int id, string hashAnterior, string hashNuevo)
+    {
+        await using var db = await factory.AbrirAsync();
+        await using var tx = (SqlTransaction)await db.BeginTransactionAsync();
+        var filas = await db.ExecuteAsync("""
+            UPDATE seguridad.usuario SET password_hash = @hashNuevo, debe_cambiar_password = 0, version_credenciales = version_credenciales + 1
+            WHERE id = @id AND activo = 1 AND password_hash = @hashAnterior;
+            """, new { id, hashAnterior, hashNuevo }, tx);
+        if(filas != 1)
+        {
+            return false;
+        }
+        await db.ExecuteAsync("INSERT seguridad.bitacora(id_usuario, accion) VALUES(@id, 'CAMBIAR_PASSWORD')", new { id }, tx);
+        await tx.CommitAsync();
+        return true;
     }
 
     public async Task RegistrarLoginAsync(int id)

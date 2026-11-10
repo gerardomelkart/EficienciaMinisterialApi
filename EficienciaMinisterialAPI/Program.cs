@@ -56,6 +56,7 @@ try
     builder.Services.AddScoped<UsuarioRepository>();
     builder.Services.AddScoped<CatalogoRepository>();
     builder.Services.AddScoped<ExcelCargaService>();
+    builder.Services.AddScoped<CruceRndService>();
     builder.Services.AddScoped<CargaRepository>();
     if(args.Contains("--crear-superusuario"))
     {
@@ -94,7 +95,9 @@ try
                     return;
                 }
                 var usuario = await context.HttpContext.RequestServices.GetRequiredService<UsuarioService>().ObtenerAsync(usuarioId);
-                if(usuario == null || !usuario.SeleccionarAcceso(accesoId))
+                if(usuario == null || !usuario.SeleccionarAcceso(accesoId)
+                    || !int.TryParse(context.Principal?.FindFirstValue("credenciales"), out var version)
+                    || usuario.VersionCredenciales != version)
                 {
                     context.Fail("Usuario inactivo.");
                     return;
@@ -143,6 +146,18 @@ try
     app.UseRateLimiter();
     app.UseAuthentication();
     app.UseAuthorization();
+    app.Use(async (context, next) =>
+    {
+        if(context.Items["Usuario"] is UsuarioInfo { DebeCambiarPassword: true }
+            && context.Request.Path != "/api/auth/cambiar-password"
+            && context.Request.Path != "/api/auth/me")
+        {
+            context.Response.StatusCode = 403;
+            await context.Response.WriteAsJsonAsync(new { mensaje = "Debe cambiar su contraseña antes de continuar." });
+            return;
+        }
+        await next();
+    });
     if(app.Environment.IsDevelopment())
     {
         app.MapOpenApi();

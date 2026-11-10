@@ -11,6 +11,23 @@ void Probar(string nombre, Action accion)
     catch(Exception e) { fallos++; Console.WriteLine("ERROR " + nombre + ": " + e.Message); }
 }
 void Ver(bool valor, string mensaje) { if(!valor) throw new Exception(mensaje); }
+Probar("Primer login obligatorio excepto cuentas con acceso de superusuario", () =>
+{
+    var cuenta = new UsuarioInfo { CambioPasswordPendiente = true, Accesos = [new() { Rol = "CONSULTA" }] };
+    Ver(cuenta.DebeCambiarPassword, "Consulta debe cambiar contraseña");
+    cuenta.Accesos.Add(new() { Rol = "SUPER_USUARIO" });
+    Ver(!cuenta.DebeCambiarPassword, "Superusuario debe quedar exento aunque su acceso elegido sea consulta");
+    cuenta.Accesos.RemoveAt(1);
+    cuenta.CambioPasswordPendiente = false;
+    Ver(!cuenta.DebeCambiarPassword, "No debe repetir el cambio después de completarlo");
+});
+Probar("RND elige última tabla diaria válida, excluye FA y fechas futuras", () =>
+{
+    var tabla = CruceRndService.UltimaTabla(["tablero_rnd_20261108", "tablero_rnd_20261109_fa", "tablero_rnd_20261109", "tablero_rnd_20261110", "tablero_rnd_20260230", "tablero_rnd_20261109];DROP"], new DateTime(2026, 11, 9));
+    Ver(tabla == "tablero_rnd_20261109", "Tabla diaria incorrecta");
+    Ver(CruceRndService.UltimaTabla(["tablero_rnd_20261109_fa"], new DateTime(2026, 11, 9)) == null, "No debe usar FA como respaldo");
+    Ver(CruceRndService.UltimaTabla(["tablero_rnd_20261107"], new DateTime(2026, 11, 9)) == "tablero_rnd_20261107", "Debe aceptar última carga disponible aunque falte la de hoy");
+});
 UsuarioInfo usuario = new() { Institucion = "SEDENA", Ambito = "ESTATAL", Entidad = 9 };
 // Datos sintéticos exclusivos de estas pruebas. La aplicación obtiene los catálogos desde SQL.
 var catalogo = new CatalogoCaptura

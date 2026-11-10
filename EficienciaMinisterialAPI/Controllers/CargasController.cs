@@ -10,7 +10,7 @@ namespace EficienciaMinisterialAPI.Controllers;
 [ApiController]
 [Authorize(Roles = "PRIMER_RESPONDIENTE,SUPER_USUARIO,CONSULTA")]
 [Route("api/primer-respondiente")]
-public sealed class CargasController(ExcelCargaService excel, CargaRepository cargas, UsuarioRepository usuarios, LimitesCarga limites, CatalogoRepository catalogos) : ControllerBase
+public sealed class CargasController(ExcelCargaService excel, CargaRepository cargas, UsuarioRepository usuarios, LimitesCarga limites, CatalogoRepository catalogos, CruceRndService rnd) : ControllerBase
 {
     private UsuarioInfo Usuario => (UsuarioInfo)HttpContext.Items["Usuario"]!;
 
@@ -135,7 +135,20 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
         {
             return BadRequest(new { mensaje = "El nombre del archivo es demasiado largo." });
         }
-        var id = await cargas.GuardarAsync(Usuario, nombre, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)), idPeriodo, resultado.Registros);
+        var cruce = await rnd.CruzarAsync(resultado.Registros);
+        foreach(var registro in resultado.Registros)
+        {
+            var coincidencias = cruce.Filas.GetValueOrDefault(registro.Fila) ?? [];
+            if(coincidencias.Count == 0)
+            {
+                resultado.Avisos.Add(new(registro.Fila, "RND", "No localizado por folio ni nombre del primer respondiente y fecha. Requiere consentimiento; no se enviará a fiscalías.", registro.FolioRnd));
+            }
+            else if(coincidencias.Select(c => (c.IdDetenido, c.IdDetencion)).Distinct().Count() > 1)
+            {
+                resultado.Avisos.Add(new(registro.Fila, "RND", "El RND tiene varias personas o detenciones para este folio; se conservan las coincidencias para seguimiento.", registro.FolioRnd));
+            }
+        }
+        var id = await cargas.GuardarAsync(Usuario, nombre, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)), idPeriodo, resultado.Registros, cruce);
         return Ok(new { valido = true, idCarga = id, totalRegistros = resultado.Registros.Count, errores = resultado.Errores, avisos = resultado.Avisos });
     }
 
@@ -143,7 +156,7 @@ public sealed class CargasController(ExcelCargaService excel, CargaRepository ca
     [HttpPost("cargas/confirmar")]
     public async Task<IActionResult> Confirmar(ConfirmarCargaRequest request)
     {
-        var carga = await cargas.ConfirmarAsync(Usuario, request.IdCarga);
+        var carga = await cargas.ConfirmarAsync(Usuario, request.IdCarga, request.AceptaNoLocalizados);
         return carga == null ? NotFound() : Ok(carga);
     }
 

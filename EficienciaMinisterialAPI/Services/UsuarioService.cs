@@ -22,6 +22,29 @@ public sealed class UsuarioService(UsuarioRepository repository, CatalogoReposit
         return await ObtenerAsync(usuario.Id);
     }
 
+    public async Task CambiarPasswordAsync(UsuarioInfo usuario, CambiarPasswordRequest request)
+    {
+        if(request.PasswordNueva != request.Confirmacion || request.PasswordNueva.Length < 12
+            || System.Text.Encoding.UTF8.GetByteCount(request.PasswordNueva) > 72)
+        {
+            throw new ArgumentException("Las contraseñas deben coincidir y tener al menos 12 caracteres y hasta 72 bytes UTF-8.");
+        }
+        var credenciales = await repository.ObtenerCredencialesAsync(usuario.Usuario);
+        if(credenciales == null || System.Text.Encoding.UTF8.GetByteCount(request.PasswordActual) > 72
+            || !BCrypt.Net.BCrypt.Verify(request.PasswordActual, credenciales.PasswordHash))
+        {
+            throw new ArgumentException("La contraseña actual es incorrecta.");
+        }
+        if(BCrypt.Net.BCrypt.Verify(request.PasswordNueva, credenciales.PasswordHash))
+        {
+            throw new ArgumentException("La nueva contraseña debe ser diferente de la actual.");
+        }
+        if(!await repository.CambiarPasswordAsync(usuario.Id, credenciales.PasswordHash, BCrypt.Net.BCrypt.HashPassword(request.PasswordNueva, 12)))
+        {
+            throw new ArgumentException("La cuenta cambió. Inicie sesión nuevamente.");
+        }
+    }
+
     public async Task<int> CrearAsync(CrearUsuarioRequest request, int? actor)
     {
         if(string.IsNullOrWhiteSpace(request.Usuario) || string.IsNullOrWhiteSpace(request.Nombre)

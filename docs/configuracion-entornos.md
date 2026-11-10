@@ -117,3 +117,14 @@ Los valores anteriores son marcadores de ejemplo. Completar únicamente en el se
 Para quien revise este repo público: no se requieren credenciales reales para compilar. Para probar el flujo completo, crear una base de pruebas propia, instalar los scripts y proporcionar sus secretos mediante estos mecanismos. No subir archivos `.env`, credenciales reales ni logs al repositorio.
 
 La sección Carga de appsettings.json contiene los límites técnicos de archivos y filas. Puede sobrescribirse mediante configuración de entorno (por ejemplo, Carga__MaximoBytes). El front obtiene esos límites desde la API.
+
+
+### Conexión de cruce con el destino de DBBridge
+
+Configurar `ConnectionStrings:RndDestino` mediante UserSecrets en desarrollo o
+`ConnectionStrings__RndDestino` en el entorno del servicio. Debe apuntar a la base `RND`
+del SQL Server destino de DBBridge, con permiso de lectura sobre la serie diaria dbo.tablero_rnd_yyyyMMdd
+y acceso al bloqueo de aplicación `DBBridge_RND` (principal public). No usar el origen ni RND_FA.
+No guardar credenciales en appsettings ni en este repositorio. Aplicar las migraciones 007 a 009
+en EficienciaMinisterial_DEV, y desplegar API y front juntos. Todas las sesiones anteriores requieren login.
+La ausencia de conexión o una tabla con estructura incompatible impide validar; no hay cruce ficticio.

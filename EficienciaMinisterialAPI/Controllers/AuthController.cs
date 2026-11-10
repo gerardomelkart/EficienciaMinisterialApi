@@ -45,12 +45,24 @@ public sealed class AuthController(UsuarioService usuarios, IConfiguration confi
         return EmitirSesion(usuario);
     }
 
+    [Authorize]
+    [EnableRateLimiting("login")]
+    [HttpPost("cambiar-password")]
+    public async Task<IActionResult> CambiarPassword(CambiarPasswordRequest request)
+    {
+        var usuario = (UsuarioInfo)HttpContext.Items["Usuario"]!;
+        await usuarios.CambiarPasswordAsync(usuario, request);
+        var actualizado = await usuarios.ObtenerAsync(usuario.Id);
+        actualizado!.SeleccionarAcceso(usuario.IdAcceso);
+        return EmitirSesion(actualizado);
+    }
+
     private IActionResult EmitirSesion(UsuarioInfo usuario)
     {
         var vence = DateTime.UtcNow.AddHours(1);
         var token = new JwtSecurityToken(
             issuer: configuration["Jwt:Issuer"], audience: configuration["Jwt:Audience"],
-            claims: [new Claim(ClaimTypes.NameIdentifier, usuario.Id.ToString()), new Claim("acceso", usuario.IdAcceso.ToString())],
+            claims: [new Claim("credenciales", usuario.VersionCredenciales.ToString()), new Claim(ClaimTypes.NameIdentifier, usuario.Id.ToString()), new Claim("acceso", usuario.IdAcceso.ToString())],
             expires: vence,
             signingCredentials: new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration["Jwt:Key"]!)), SecurityAlgorithms.HmacSha256));
         Response.Headers.CacheControl = "no-store";

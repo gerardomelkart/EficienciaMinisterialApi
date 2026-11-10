@@ -165,3 +165,25 @@ Aplicar `scripts/006_archivos_bajo_demanda.sql` del repo de BD antes de iniciar 
 El modal sigue el patrón de SIIID2.FrontEnd; el generador PDF toma como referencia AcuseFese de IngestaDeDatos.Api y usa el mismo encabezado institucional. Solo se incorporan recursos institucionales, sin datos ni configuración de esos sistemas.
 
 El formulario multipart mantiene en memoria los archivos hasta el máximo configurado en Carga:MaximoBytes, sin el derrame temporal a disco del umbral predeterminado de ASP.NET. Ese máximo no puede superar Int32.MaxValue; el valor habitual es 10 MB. El PDF usa las fuentes estándar y codificación de FESE; caracteres fuera de Latin-1 en el nombre original pueden mostrarse como sustituciones en su texto. El nombre de descarga se construye con institución, periodo y folio, usando caracteres seguros.
+
+
+### Primer inicio de sesión
+
+Aplicar `EficienciaMinisterialBD/scripts/007_primer_login.sql` antes de iniciar la API actualizada.
+Las cuentas existentes y nuevas deben cambiar su contraseña antes de acceder a los módulos.
+Las cuentas con cualquier acceso `SUPER_USUARIO` quedan exentas. El cambio exige contraseña actual,
+nueva diferente de al menos 12 caracteres y confirmación; se registra en bitácora.
+La API bloquea las operaciones hasta completar el cambio. El indicador se desactiva al guardarlo.
+La confirmación rechaza el mismo SHA-256 para una corporación y periodo ya confirmados,
+incluso en solicitudes concurrentes; no se guardan archivos originales.
+
+
+### Cruce diario RND y control de entregas
+
+Aplicar las migraciones 007, 008 y 009 de EficienciaMinisterialBD; configurar en la API
+`ConnectionStrings:RndDestino` fuera del repositorio. La validación consulta la última tabla diaria
+completa del destino DBBridge y conserva referencias RND, fuente y fecha sin guardar el Excel.
+Los no localizados requieren consentimiento expreso. La última carga de una corporación/quincena
+es la vigente y se preservan las anteriores; la quincena cierra al completar las corporaciones esperadas.
+El cruce de validación está implementado; plantillas y seguimiento de fiscalías e informes finales
+siguen pendientes. Ver docs/revision-carga-y-catalogos.md en el repositorio de API.
