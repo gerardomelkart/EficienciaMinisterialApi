@@ -16,17 +16,18 @@ if (!$destino.Success -or $destino.Groups['base'].Value -ne 'RND') {
 }
 
 $cadena = New-Object System.Data.SqlClient.SqlConnectionStringBuilder
-$cadena.DataSource = $destino.Groups['servidor'].Value
-$cadena.InitialCatalog = $destino.Groups['base'].Value
-$cadena.UserID = $destino.Groups['usuario'].Value
-$cadena.Password = $destino.Groups['password'].Value
-$cadena.Encrypt = $false
-$cadena.TrustServerCertificate = $true
-$cadena.ConnectTimeout = 30
-$cadena.ApplicationName = 'EficienciaMinisterial cruce RND'
+$cadena['Data Source'] = $destino.Groups['servidor'].Value
+$cadena['Initial Catalog'] = $destino.Groups['base'].Value
+$cadena['User ID'] = $destino.Groups['usuario'].Value
+$cadena['Password'] = $destino.Groups['password'].Value
+$cadena['Encrypt'] = $false
+$cadena['TrustServerCertificate'] = $true
+$cadena['Connect Timeout'] = 30
+$cadena['Application Name'] = 'EficienciaMinisterial cruce RND'
 $proyecto = Join-Path $PSScriptRoot '..\EficienciaMinisterialAPI\EficienciaMinisterialAPI.csproj'
 
-& dotnet user-secrets set 'ConnectionStrings:RndDestino' $cadena.ConnectionString --project $proyecto
+$valorConexion = $cadena.get_ConnectionString()
+& dotnet user-secrets set 'ConnectionStrings:RndDestino' $valorConexion --project $proyecto
 if ($LASTEXITCODE -ne 0) {
     throw 'No fue posible guardar la conexión en UserSecrets.'
 }
