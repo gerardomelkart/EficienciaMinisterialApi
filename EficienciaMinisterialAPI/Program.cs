@@ -58,6 +58,7 @@ try
     builder.Services.AddScoped<ExcelCargaService>();
     builder.Services.AddScoped<CruceRndService>();
     builder.Services.AddScoped<CargaRepository>();
+    builder.Services.AddScoped<InformePrimerRespondienteRepository>();
     if(args.Contains("--crear-superusuario"))
     {
         await using var provisionamiento = builder.Build();

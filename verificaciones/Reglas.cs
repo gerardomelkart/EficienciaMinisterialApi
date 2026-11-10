@@ -53,6 +53,35 @@ Probar("Detalle del cruce conserva método, fuente e identificadores y distingue
     var sin = CruceRndService.Detallar(registro, cruce with { Administrativas = new() });
     Ver(sin.Mensaje == "No localizado" && sin.Cruce!.Contains(cruce.TablaFa), "Falta trazabilidad de las tablas sin coincidencia");
 });
+Probar("Reporte PR valida filtros y paginación antes de consultar SQL", () =>
+{
+    new FiltrosInformePr().Validar();
+    foreach(var filtro in new FiltrosInformePr[] {
+        new() { Inicio = new DateTime(2026, 10, 1) }, new() { Pagina = 0 },
+        new() { Tamano = 101 }, new() { Entidad = 0 }, new() { Entidad = 33 },
+        new() { Inicio = new DateTime(2026, 10, 16), Fin = new DateTime(2026, 10, 1) }
+    })
+    {
+        var rechazo = false;
+        try { filtro.Validar(); } catch(ArgumentException) { rechazo = true; }
+        Ver(rechazo, "Filtro inválido fue aceptado");
+    }
+});
+Probar("Reporte PR Excel incluye resumen y detalle y conserva textos sin fórmulas", () =>
+{
+    var inicio = new DateTime(2026, 10, 1); var fin = new DateTime(2026, 10, 15);
+    var informe = new InformePr(new() { Registros = 1 },
+        [new() { PeriodoInicio = inicio, PeriodoFin = fin, Corporacion = "SSPC", Registros = 1, Pendientes = 1 }],
+        [new() { PeriodoInicio = inicio, PeriodoFin = fin, Corporacion = "SSPC", FolioEntrega = "EM-PR-PRUEBA",
+            NombreDetenido = "=1+1", FechaDetencion = new DateTime(2025, 6, 1), EstadoCruce = "PENDIENTE", Duplicado = true }], 1, 25);
+    Ver(InformePrimerRespondienteExcel.NombreArchivo(informe) == "Reporte_PrimerRespondiente_01-10-2026_al_15-10-2026.xlsx", "Nombre debe usar sólo fechas");
+    using var libro = new XLWorkbook(new MemoryStream(InformePrimerRespondienteExcel.Crear(informe)));
+    Ver(libro.Worksheets.Count == 2, "Faltan hojas");
+    Ver(libro.Worksheet("Registros").Cell(2, 7).GetString() == "=1+1" && !libro.Worksheet("Registros").Cell(2, 7).HasFormula, "Nombre interpretado como fórmula");
+    Ver(libro.Worksheet("Registros").Cell(2, 6).GetDateTime() == new DateTime(2025, 6, 1), "No debe cambiar fecha de detención al periodo de entrega");
+    Ver(libro.Worksheet("Registros").Cell(2, 12).GetString() == "SI", "Falta bandera de duplicado");
+    Ver(libro.Worksheet("Resumen").Cell(2, 9).GetValue<int>() == 1, "Pendientes no deben presentarse como no localizados");
+});
 UsuarioInfo usuario = new() { Institucion = "SEDENA", Ambito = "ESTATAL", Entidad = 9 };
 // Datos sintéticos exclusivos de estas pruebas. La aplicación obtiene los catálogos desde SQL.
 var catalogo = new CatalogoCaptura

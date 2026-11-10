@@ -1,5 +1,17 @@
 # Eficiencia Ministerial API
 
+
+## Reporte primer respondiente — estado actual
+
+Implementado con datos reales de entregas confirmadas y vigentes: filtros por quincena,
+corporación y entidad; resumen, detalle paginado y descarga Excel con todas las filas filtradas.
+La API aplica el alcance del acceso activo tanto en catálogos como en consulta y exportación.
+El reporte no consulta de nuevo RND ni incluye respuestas de fiscalías. Reporte completo continúa
+pendiente. No requiere migración nueva: usar la BD con las migraciones existentes hasta 009.
+La guía de prueba está en docs/pruebas-reporte-primer-respondiente.md del repositorio de API.
+Las notas de entregas anteriores que aparecen abajo se conservan como historial de desarrollo.
+
+
 API central del proyecto, desarrollada en C# con .NET 10. Este repositorio contiene los controladores, servicios, acceso SQL y configuración de autenticación y logs de la primera etapa.
 
 ## Proyecto Eficiencia Ministerial
@@ -12,7 +24,7 @@ Esta versión incorpora las primeras reglas confirmadas del cuestionario: usuari
 
 | Repositorio | Responsabilidad | Tecnología |
 | --- | --- | --- |
-| [PrimerRespondienteFront](https://github.com/gerardomelkart/PrimerRespondienteFront) | Interfaz de acceso, captura por Excel, navegación e informes provisionales. | Angular, TypeScript, Bootstrap |
+| [PrimerRespondienteFront](https://github.com/gerardomelkart/PrimerRespondienteFront) | Interfaz de acceso, captura por Excel, navegación y reporte primer respondiente con datos reales. | Angular, TypeScript, Bootstrap |
 | [EficienciaMinisterialApi](https://github.com/gerardomelkart/EficienciaMinisterialApi) | Autenticación, autorización, validaciones, recepción de archivos y acceso a datos. | C#, ASP.NET Core, .NET 10 |
 | [EficienciaMinisterialBD](https://github.com/gerardomelkart/EficienciaMinisterialBD) | Esquemas, tablas, catálogos, índices y secuencia de folios. | SQL Server 2019 o superior |
 
@@ -25,7 +37,7 @@ El flujo implementado para las corporaciones permite descargar una plantilla, ca
 El flujo previsto para fiscalías consiste en descargar una plantilla con información de referencia y completar los campos de seguimiento ministerial. Esa segunda etapa todavía no está implementada.
 
 - **Disponible:** autenticación JWT, selección de acceso, alta/edición/activación de usuarios, carga y validación de Excel, confirmación con folio, acuse y registros de operación.
-- **Provisional:** pantallas de informes “Reporte primer respondiente” y “Reporte completo”, sin consultas ni indicadores definitivos.
+- **Informes:** Reporte primer respondiente con datos reales y Excel; Reporte completo pendiente del seguimiento de fiscalías.
 - **Pendiente:** catálogo definitivo de fiscalías, plantilla de seguimiento, cruces automáticos, control de quincenas y reportes operativos.
 
 Las futuras conexiones con SIIID e Ingesta de Datos no están implementadas. El cruce con RND/RND_FA, a partir de las copias generadas por DBBridge, también está pendiente. No existe actualmente un integrador entre estos sistemas.
