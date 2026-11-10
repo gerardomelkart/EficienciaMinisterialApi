@@ -27,3 +27,11 @@ Se registran CONSULTAR_REPORTE_PR y DESCARGAR_REPORTE_PR en seguridad.bitacora.
 
 Validación local: compilación API y Angular; verificaciones/Reglas.cs prueba filtros y Excel con datos
 sintéticos exclusivamente de pruebas. Pendiente verificar consultas, permisos y tiempos contra SQL real.
+
+## Filtros, ordenamiento y descargas
+
+- Año lista sólo años con entregas accesibles; periodo muestra las quincenas del año seleccionado. Cambiar año limpia el periodo.
+- Primer respondiente: corporación fija según su acceso activo. Acceso estatal: entidad fija. Acceso nacional: permite seleccionar entidad. SQL intersecta siempre los filtros con el acceso, también al descargar.
+- En ambas tablas, pulsar cada encabezado alterna ascendente/descendente. En registros se ordena toda la consulta antes de paginar. Cambiar orden regresa a la primera página.
+- Cada tabla tiene descarga propia; el botón general conserva ambas hojas. Se exportan todos los registros filtrados en el orden elegido, no sólo la página visible.
+- Probar con Guardia Nacional estatal y nacional, y con superusuario. Manipular los parámetros corporacion/entidad desde Network no debe ampliar el acceso.

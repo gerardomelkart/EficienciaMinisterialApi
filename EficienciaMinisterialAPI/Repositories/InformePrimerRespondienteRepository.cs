@@ -34,14 +34,18 @@ public sealed class InformePrimerRespondienteRepository(SqlConnectionFactory fac
         var periodos = (await datos.ReadAsync<PeriodoInfo>()).ToList();
         var corporaciones = (await datos.ReadAsync()).ToList();
         var entidades = (await datos.ReadAsync()).ToList();
-        return new { periodos, corporaciones, entidades };
+        return new { periodos, corporaciones, entidades, acceso = new {
+            puedeElegirCorporacion = usuario.Rol == "SUPER_USUARIO" || (usuario.Rol == "CONSULTA" && usuario.Institucion == null),
+            puedeElegirEntidad = usuario.Rol == "SUPER_USUARIO" || usuario.Ambito == "NACIONAL",
+            corporacion = usuario.Institucion, entidad = usuario.Entidad
+        } };
     }
 
     private static object Parametros(UsuarioInfo usuario, FiltrosInformePr filtros) => new
     {
         EsSuper = usuario.Rol == "SUPER_USUARIO", Rol = usuario.Rol,
         InstitucionAcceso = usuario.Institucion, usuario.Ambito, EntidadAcceso = usuario.Entidad,
-        Inicio = filtros.Inicio?.Date, Fin = filtros.Fin?.Date, filtros.Corporacion, filtros.Entidad,
+        filtros.Anio, Inicio = filtros.Inicio?.Date, Fin = filtros.Fin?.Date, filtros.Corporacion, filtros.Entidad,
         Offset = (filtros.Pagina - 1) * filtros.Tamano, filtros.Tamano, UsuarioId = usuario.Id
     };
 
@@ -72,13 +76,14 @@ public sealed class InformePrimerRespondienteRepository(SqlConnectionFactory fac
             JOIN catalogo.entidad e ON e.id = r.entidad
             LEFT JOIN catalogo.fuero f ON f.codigo = r.tipo_fuero
             WHERE {Alcance}
+                AND (@Anio IS NULL OR (c.periodo_inicio >= DATEFROMPARTS(@Anio, 1, 1) AND c.periodo_inicio < DATEFROMPARTS(@Anio + 1, 1, 1)))
                 AND (@Inicio IS NULL OR (c.periodo_inicio = @Inicio AND c.periodo_fin = @Fin))
                 AND (@Corporacion IS NULL OR c.institucion = @Corporacion)
                 AND (@Entidad IS NULL OR r.entidad = @Entidad);
             SELECT {Agregados} FROM #informe;
             SELECT PeriodoInicio, PeriodoFin, Corporacion, {Agregados}
-            FROM #informe GROUP BY PeriodoInicio, PeriodoFin, Corporacion ORDER BY PeriodoInicio DESC, Corporacion;
-            SELECT * FROM #informe ORDER BY PeriodoInicio DESC, Corporacion, OrdenCarga, OrdenFila
+            FROM #informe GROUP BY PeriodoInicio, PeriodoFin, Corporacion ORDER BY {filtros.OrdenResumen} {(filtros.DescendenteResumen ? "DESC" : "ASC")}{(filtros.OrdenResumen == "PeriodoInicio" ? ", Corporacion" : filtros.OrdenResumen == "Corporacion" ? ", PeriodoInicio" : ", PeriodoInicio, Corporacion")};
+            SELECT * FROM #informe ORDER BY {filtros.Orden} {(filtros.Descendente ? "DESC" : "ASC")}, OrdenCarga, OrdenFila
                 OFFSET {(exportar ? "0" : "@Offset")} ROWS FETCH NEXT {(exportar ? "1048575" : "@Tamano")} ROWS ONLY;
             DROP TABLE #informe;
             INSERT seguridad.bitacora(id_usuario, accion) VALUES(@UsuarioId, '{(exportar ? "DESCARGAR_REPORTE_PR" : "CONSULTAR_REPORTE_PR")}');

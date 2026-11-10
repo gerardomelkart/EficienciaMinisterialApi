@@ -11,10 +11,11 @@ public static class InformePrimerRespondienteExcel
         return $"Reporte_PrimerRespondiente_{inicio:dd-MM-yyyy}_al_{fin:dd-MM-yyyy}.xlsx";
     }
 
-    public static byte[] Crear(InformePr informe)
+    public static byte[] Crear(InformePr informe, string tabla = "ambas")
     {
         if(informe.Totales.Registros > XLHelper.MaxRowNumber - 1)
             throw new ArgumentException("El reporte supera las filas permitidas por Excel. Seleccione una quincena o corporación.");
+        if(tabla is not ("ambas" or "resumen" or "registros")) throw new ArgumentException("Seleccione una tabla válida.");
         using var libro = new XLWorkbook();
         var resumen = libro.AddWorksheet("Resumen");
         string[] cabeceras = ["INICIO ENTREGA", "FIN ENTREGA", "CORPORACION", "ENTREGAS", "REGISTROS REPORTADOS", "FOLIOS INFORMADOS DISTINTOS", "LOCALIZADOS RND", "NO LOCALIZADOS", "PENDIENTES DE CRUCE", "REGISTROS MARCADOS DUPLICADOS"];
@@ -61,6 +62,8 @@ public static class InformePrimerRespondienteExcel
             if(hoja.LastRowUsed()!.RowNumber() > 1) hoja.RangeUsed()!.CreateTable();
         }
         detalle.Column(7).Width = 44; detalle.Column(9).Width = 45;
+        if(tabla == "resumen") libro.Worksheets.Delete("Registros");
+        if(tabla == "registros") libro.Worksheets.Delete("Resumen");
         using var salida = new MemoryStream();
         libro.SaveAs(salida);
         return salida.ToArray();

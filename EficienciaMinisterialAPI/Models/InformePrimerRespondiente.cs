@@ -2,6 +2,13 @@ namespace EficienciaMinisterialAPI.Models;
 
 public sealed class FiltrosInformePr
 {
+    public int? Anio { get; set; }
+    public string Orden { get; set; } = "PeriodoInicio";
+    public bool Descendente { get; set; } = true;
+    public string OrdenResumen { get; set; } = "PeriodoInicio";
+    public bool DescendenteResumen { get; set; } = true;
+    public static readonly string[] Columnas = ["PeriodoInicio", "FolioEntrega", "Corporacion", "FolioRnd", "FechaDetencion", "NombreDetenido", "Entidad", "EstadoCruce", "Duplicado", "FechaFuente"];
+    public static readonly string[] ColumnasResumen = ["PeriodoInicio", "Corporacion", "Entregas", "Registros", "Localizados", "NoLocalizados", "Pendientes", "Duplicados"];
     public DateTime? Inicio { get; set; }
     public DateTime? Fin { get; set; }
     public string? Corporacion { get; set; }
@@ -11,7 +18,7 @@ public sealed class FiltrosInformePr
 
     public void Validar()
     {
-        if(Inicio.HasValue != Fin.HasValue || Inicio > Fin || Pagina < 1 || Pagina > 1_000_000
+        if(Anio is < 2000 or > 2100 || !Columnas.Contains(Orden) || !ColumnasResumen.Contains(OrdenResumen) || Inicio.HasValue != Fin.HasValue || Inicio > Fin || Pagina < 1 || Pagina > 1_000_000
             || Tamano is < 1 or > 100 || Corporacion?.Length > 20 || Entidad is 0 or > 32)
         {
             throw new ArgumentException("Revise el periodo, corporación, entidad o paginación del reporte.");

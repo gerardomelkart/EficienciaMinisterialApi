@@ -58,7 +58,8 @@ Probar("Reporte PR valida filtros y paginación antes de consultar SQL", () =>
     new FiltrosInformePr().Validar();
     foreach(var filtro in new FiltrosInformePr[] {
         new() { Inicio = new DateTime(2026, 10, 1) }, new() { Pagina = 0 },
-        new() { Tamano = 101 }, new() { Entidad = 0 }, new() { Entidad = 33 },
+        new() { Anio = 1999 }, new() { Orden = "PeriodoInicio; DROP TABLE carga" },
+        new() { OrdenResumen = "inexistente" }, new() { Tamano = 101 }, new() { Entidad = 0 }, new() { Entidad = 33 },
         new() { Inicio = new DateTime(2026, 10, 16), Fin = new DateTime(2026, 10, 1) }
     })
     {
@@ -77,6 +78,11 @@ Probar("Reporte PR Excel incluye resumen y detalle y conserva textos sin fórmul
     Ver(InformePrimerRespondienteExcel.NombreArchivo(informe) == "Reporte_PrimerRespondiente_01-10-2026_al_15-10-2026.xlsx", "Nombre debe usar sólo fechas");
     using var libro = new XLWorkbook(new MemoryStream(InformePrimerRespondienteExcel.Crear(informe)));
     Ver(libro.Worksheets.Count == 2, "Faltan hojas");
+    foreach(var tabla in new[] { "resumen", "registros" })
+    {
+        using var individual = new XLWorkbook(new MemoryStream(InformePrimerRespondienteExcel.Crear(informe, tabla)));
+        Ver(individual.Worksheets.Count == 1 && individual.Worksheet(1).Name.Equals(tabla, StringComparison.OrdinalIgnoreCase), "Descarga individual contiene otra tabla");
+    }
     Ver(libro.Worksheet("Registros").Cell(2, 7).GetString() == "=1+1" && !libro.Worksheet("Registros").Cell(2, 7).HasFormula, "Nombre interpretado como fórmula");
     Ver(libro.Worksheet("Registros").Cell(2, 6).GetDateTime() == new DateTime(2025, 6, 1), "No debe cambiar fecha de detención al periodo de entrega");
     Ver(libro.Worksheet("Registros").Cell(2, 12).GetString() == "SI", "Falta bandera de duplicado");
