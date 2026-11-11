@@ -10,7 +10,7 @@ public sealed class UsuarioRepository(SqlConnectionFactory factory)
     {
         await using var db = await factory.AbrirAsync();
         using var datos = await db.QueryMultipleAsync("""
-            SELECT id, usuario, nombre, activo, debe_cambiar_password AS CambioPasswordPendiente, version_credenciales AS VersionCredenciales FROM seguridad.usuario WHERE id = @id AND activo = 1;
+            SELECT id, usuario, nombre, activo, debe_cambiar_password AS CambioPasswordPendiente, version_credenciales AS VersionCredenciales FROM seguridad.usuario WHERE id = @id AND activo = 1 AND eliminado = 0;
             SELECT id, rol, institucion, ambito, entidad FROM seguridad.usuario_acceso WHERE id_usuario = @id ORDER BY id;
             """, new { id });
         var usuario = await datos.ReadSingleOrDefaultAsync<UsuarioInfo>();
@@ -30,8 +30,8 @@ public sealed class UsuarioRepository(SqlConnectionFactory factory)
     {
         await using var db = await factory.AbrirAsync();
         using var datos = await db.QueryMultipleAsync("""
-            SELECT id, usuario, nombre, activo, debe_cambiar_password AS CambioPasswordPendiente, version_credenciales AS VersionCredenciales FROM seguridad.usuario ORDER BY nombre;
-            SELECT id, id_usuario AS IdUsuario, rol, institucion, ambito, entidad FROM seguridad.usuario_acceso ORDER BY id;
+            SELECT id, usuario, nombre, activo, debe_cambiar_password AS CambioPasswordPendiente, version_credenciales AS VersionCredenciales FROM seguridad.usuario WHERE eliminado = 0 ORDER BY nombre;
+            SELECT id, id_usuario AS IdUsuario, rol, institucion, ambito, entidad FROM seguridad.usuario_acceso WHERE id_usuario IN (SELECT id FROM seguridad.usuario WHERE eliminado = 0) ORDER BY id;
             """);
         var usuarios = (await datos.ReadAsync<UsuarioInfo>()).ToList();
         var accesos = (await datos.ReadAsync<AccesoConUsuario>()).ToLookup(a => a.IdUsuario);
@@ -61,7 +61,7 @@ public sealed class UsuarioRepository(SqlConnectionFactory factory)
         await using var db = await factory.AbrirAsync();
         return await db.QuerySingleOrDefaultAsync<UsuarioAutenticacion>("""
             SELECT id, password_hash AS PasswordHash FROM seguridad.usuario
-            WHERE usuario = @usuario AND activo = 1
+            WHERE usuario = @usuario AND activo = 1 AND eliminado = 0
             """, new { usuario });
     }
 
@@ -121,7 +121,7 @@ public sealed class UsuarioRepository(SqlConnectionFactory factory)
         await using var db = await factory.AbrirAsync();
         await using var tx = (SqlTransaction)await db.BeginTransactionAsync();
         await BloquearAdministracionAsync(db, tx);
-        if(!await db.ExecuteScalarAsync<bool>("SELECT CAST(CASE WHEN EXISTS(SELECT 1 FROM seguridad.usuario WHERE id = @id) THEN 1 ELSE 0 END AS bit)", new { id }, tx))
+        if(!await db.ExecuteScalarAsync<bool>("SELECT CAST(CASE WHEN EXISTS(SELECT 1 FROM seguridad.usuario WHERE id = @id AND eliminado = 0) THEN 1 ELSE 0 END AS bit)", new { id }, tx))
         {
             return false;
         }
@@ -153,6 +153,32 @@ public sealed class UsuarioRepository(SqlConnectionFactory factory)
         await db.ExecuteAsync("INSERT seguridad.bitacora(id_usuario, accion, id_usuario_objetivo) VALUES(@actor, 'ACTUALIZAR_USUARIO', @id)", new { actor, id }, tx);
         await tx.CommitAsync();
         return true;
+    }
+
+    public async Task<ResultadoEliminarUsuario> EliminarAsync(int id, int actor)
+    {
+        if(id == actor) return new(false, "No puede eliminar su propia cuenta.");
+        await using var db = await factory.AbrirAsync();
+        await using var tx = (SqlTransaction)await db.BeginTransactionAsync();
+        await BloquearAdministracionAsync(db, tx);
+        var existe = await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM seguridad.usuario WHERE id = @id AND eliminado = 0", new { id }, tx);
+        if(existe == 0) return new(false, "La cuenta ya no está disponible.", true);
+        var ultimo = await db.ExecuteScalarAsync<bool>("""
+            SELECT CAST(CASE WHEN EXISTS(
+                SELECT 1 FROM seguridad.usuario u JOIN seguridad.usuario_acceso a ON a.id_usuario = u.id
+                WHERE u.id = @id AND u.activo = 1 AND u.eliminado = 0 AND a.rol = 'SUPER_USUARIO'
+            ) AND NOT EXISTS(
+                SELECT 1 FROM seguridad.usuario u JOIN seguridad.usuario_acceso a ON a.id_usuario = u.id
+                WHERE u.id <> @id AND u.activo = 1 AND u.eliminado = 0 AND a.rol = 'SUPER_USUARIO'
+            ) THEN 1 ELSE 0 END AS bit)
+            """, new { id }, tx);
+        if(ultimo) return new(false, "Debe conservar al menos un superusuario activo.");
+        await db.ExecuteAsync("""
+            UPDATE seguridad.usuario SET eliminado = 1, activo = 0, version_credenciales = version_credenciales + 1 WHERE id = @id;
+            INSERT seguridad.bitacora(id_usuario, accion, id_usuario_objetivo) VALUES(@actor, 'ELIMINAR_USUARIO', @id);
+            """, new { id, actor }, tx);
+        await tx.CommitAsync();
+        return new(true, "Cuenta eliminada.");
     }
 
     private static async Task BloquearAdministracionAsync(SqlConnection db, SqlTransaction tx)

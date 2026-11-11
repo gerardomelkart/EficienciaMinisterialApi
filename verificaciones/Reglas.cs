@@ -114,6 +114,13 @@ Probar("Plantilla fiscalía conserva filas y deja seguimiento vacío con listas 
     Ver(hoja.DataValidations.Any(), "Faltan listas de captura");
     Ver(libro.Worksheets.Count == 3, "Faltan catálogos o instrucciones");
 });
+Probar("Eliminar rechaza la cuenta propia antes de acceder a SQL", () =>
+{
+    var configuracion = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+    var repositorio = new UsuarioRepository(new EficienciaMinisterialAPI.Data.SqlConnectionFactory(configuracion));
+    var resultado = repositorio.EliminarAsync(7, 7).GetAwaiter().GetResult();
+    Ver(!resultado.Eliminado && !resultado.NoExiste && resultado.Mensaje.Contains("propia"), "Cuenta propia no protegida");
+});
 UsuarioInfo usuario = new() { Institucion = "SEDENA", Ambito = "ESTATAL", Entidad = 9 };
 // Datos sintéticos exclusivos de estas pruebas. La aplicación obtiene los catálogos desde SQL.
 var catalogo = new CatalogoCaptura

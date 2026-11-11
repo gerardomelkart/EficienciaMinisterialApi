@@ -93,3 +93,5 @@ public sealed record RegistroDescarga(string Corporacion, string FolioRnd, DateT
     string AutoridadPuesta, string NombreDetenido, string Entidad, string TipoFuero);
 
 public sealed record ResultadoConfirmacionCarga(CargaInfo? Carga, string? Mensaje = null, List<ErrorFila>? Errores = null);
+
+public sealed record ResultadoEliminarUsuario(bool Eliminado, string Mensaje, bool NoExiste = false);

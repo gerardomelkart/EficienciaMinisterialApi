@@ -8,6 +8,7 @@ public sealed class UsuarioService(UsuarioRepository repository, CatalogoReposit
         Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)), 12);
 
     public Task<UsuarioInfo?> ObtenerAsync(int id) => repository.ObtenerAsync(id);
+    public Task<ResultadoEliminarUsuario> EliminarAsync(int id, int actor) => repository.EliminarAsync(id, actor);
     public Task<IEnumerable<UsuarioInfo>> ListarAsync() => repository.ListarAsync();
 
     public async Task<UsuarioInfo?> AutenticarAsync(LoginRequest request)

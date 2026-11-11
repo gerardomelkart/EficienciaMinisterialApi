@@ -23,6 +23,15 @@ public sealed class UsuariosController(UsuarioService usuarios) : ControllerBase
         return actualizado ? Ok(new { id }) : NotFound();
     }
 
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Eliminar(int id)
+    {
+        var resultado = await usuarios.EliminarAsync(id, int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!));
+        if(resultado.NoExiste) return NotFound(new { mensaje = resultado.Mensaje });
+        if(!resultado.Eliminado) return Conflict(new { mensaje = resultado.Mensaje });
+        return Ok(new { mensaje = resultado.Mensaje });
+    }
+
     [HttpPost]
     public async Task<IActionResult> Crear(CrearUsuarioRequest request)
     {
