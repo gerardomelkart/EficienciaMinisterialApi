@@ -97,6 +97,8 @@ public sealed class UsuarioService(UsuarioRepository repository, CatalogoReposit
 
     private async Task ValidarAccesosAsync(List<AccesoUsuario> accesos)
     {
+        // Fiscalía se asigna por territorio; no requiere institución.
+        foreach(var acceso in accesos.Where(a => a.Rol == "FISCALIA")) acceso.Institucion = null;
         var opciones = await catalogos.ObtenerPerfilesAsync();
         ValidarEstructuraAccesos(accesos, opciones.Perfiles, opciones.Ambitos);
         foreach(var acceso in accesos)

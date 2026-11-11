@@ -88,16 +88,18 @@ Probar("Reporte PR Excel incluye resumen y detalle y conserva textos sin fórmul
     Ver(libro.Worksheet("Registros").Cell(2, 12).GetString() == "SI", "Falta bandera de duplicado");
     Ver(libro.Worksheet("Resumen").Cell(2, 9).GetValue<int>() == 1, "Pendientes no deben presentarse como no localizados");
 });
-Probar("Plantilla fiscalía restringida al acceso federal autorizado", () =>
+Probar("Plantilla fiscalía admite alcance estatal y nacional sin institución", () =>
 {
     Ver(PlantillaFiscaliaService.TieneAcceso(new() { Rol = "SUPER_USUARIO" }), "Superusuario sin acceso");
-    Ver(PlantillaFiscaliaService.TieneAcceso(new() { Rol = "FISCALIA", Institucion = "FGR", Ambito = "NACIONAL" }), "FGR federal sin acceso");
+    Ver(PlantillaFiscaliaService.TieneAcceso(new() { Rol = "FISCALIA", Ambito = "NACIONAL" }), "Fiscalía nacional sin acceso");
+    Ver(PlantillaFiscaliaService.TieneAcceso(new() { Rol = "FISCALIA", Ambito = "ESTATAL", Entidad = 9 }), "Fiscalía estatal sin acceso");
     foreach(var u in new UsuarioInfo[] {
-        new() { Rol = "PRIMER_RESPONDIENTE", Institucion = "FGR", Ambito = "NACIONAL" },
-        new() { Rol = "CONSULTA", Institucion = "FGR", Ambito = "NACIONAL" },
-        new() { Rol = "FISCALIA", Institucion = "FGR", Ambito = "ESTATAL", Entidad = 9 },
-        new() { Rol = "FISCALIA", Institucion = "OTRA", Ambito = "NACIONAL" }
-    }) Ver(!PlantillaFiscaliaService.TieneAcceso(u), "Acceso ajeno autorizado");
+        new() { Rol = "PRIMER_RESPONDIENTE", Ambito = "NACIONAL" },
+        new() { Rol = "CONSULTA", Ambito = "NACIONAL" },
+        new() { Rol = "FISCALIA", Ambito = "ESTATAL" },
+        new() { Rol = "FISCALIA", Ambito = "ESTATAL", Entidad = 33 },
+        new() { Rol = "FISCALIA", Ambito = "FEDERAL" }
+    }) Ver(!PlantillaFiscaliaService.TieneAcceso(u), "Acceso inválido autorizado");
 });
 Probar("Plantilla fiscalía conserva filas y deja seguimiento vacío con listas ministeriales", () =>
 {

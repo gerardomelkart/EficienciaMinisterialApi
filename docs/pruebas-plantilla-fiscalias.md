@@ -1,18 +1,19 @@
-# Prueba de plantilla para fiscalías
+# Prueba de plantilla para fiscalías por entidad
 
-1. Actualizar y reiniciar API y Front. No requiere migración adicional: usa scripts existentes 001–009.
-2. Entrar como superusuario. Abrir **Plantilla de fiscalías** en el menú.
-3. Seleccionar FGR, año y quincena. Sólo se ofrecen periodos con registros confirmados, vigentes, localizados en RND y fuero FF reportado.
-4. Descargar. Nombre: `Plantilla_Fiscalia_dd-MM-yyyy_al_dd-MM-yyyy.xlsx`, sin hashes ni identificadores técnicos.
-5. Revisar hojas Seguimiento, Catálogos e Instrucciones. Columnas guinda: originales; columnas verdes: vacías para respuesta. Fechas originales incluso anteriores al periodo, filas repetidas y folios vacíos se conservan. Listas Sí/No y motivos desde catálogo ministerial activo.
-6. Confirmar que no aparecen registros NO_LOCALIZADO, PENDIENTE, FA, fuero FC ni cargas sin confirmar o reemplazadas.
-7. Crear usuario desde Usuarios con perfil FISCALIA, institución FGR, ámbito NACIONAL, sin entidad. Iniciar sesión, cambiar contraseña inicial y repetir descarga. Debe ver la misma plantilla federal nacional.
-8. Con primer respondiente o consulta no debe aparecer la opción; las rutas `GET /api/fiscalias/catalogos` y `GET /api/fiscalias/plantilla` deben rechazar su acceso con 403. Una fiscalía estatal tampoco tiene acceso a la plantilla FGR.
-9. Si no hay periodos, confirmar una carga PR con al menos un registro FF localizado en RND. No inventar coincidencias ni cambiar RND para probar.
+1. Ejecutar en desarrollo el script 010_fiscalias_por_entidad.sql del repositorio EficienciaMinisterialBD, después de 001–009. Actualizar y reiniciar API y Front.
+2. En Usuarios crear un acceso FISCALIA, ámbito ESTATAL y entidad Jalisco. No se solicita institución. Si se edita una cuenta existente, volver a iniciar sesión.
+3. Entrar como ese usuario. Abrir Plantilla de fiscalías, seleccionar año y periodo y descargar.
+4. Revisar que Catálogos de periodos y Excel incluyan únicamente registros de la entidad de detención asignada. No depende de institución, corporación o fuero: incluye FC y FF dentro de ese territorio. Se mantienen filtros de confirmada, vigente y LOCALIZADO.
+5. Crear otro usuario FISCALIA, ámbito NACIONAL, sin entidad ni institución. Debe poder descargar los registros elegibles de todas las entidades. Superusuario también tiene ese alcance.
+6. Un periodo ajeno solicitado manualmente no devuelve registros de otras entidades. Parámetros de fiscalía o entidad enviados por el cliente no cambian el alcance: se determina desde el usuario activo en BD.
+7. Descargar Excel: nombre Plantilla_Fiscalia_dd-MM-yyyy_al_dd-MM-yyyy.xlsx. Hojas Seguimiento, Catálogos e Instrucciones; originales en guinda y respuesta vacía en verde, con listas ministeriales existentes. Se conservan fechas y filas repetidas.
+8. Usuarios de primer respondiente y consulta no ven la opción; las rutas de fiscalías devuelven 403 para esos perfiles.
+9. Si no aparecen periodos, confirmar una carga con registros localizados de la entidad asignada. No alterar RND para simular coincidencias.
 
-## Pendientes explícitos
+## Estado y pendientes
 
-- Catálogo de fiscalías temporal hardcodeado únicamente FGR en PlantillaFiscaliaService.Fiscalias por instrucción del responsable. Sustituir por catálogo definitivo en BD y agregar estatales con reglas por entidad.
-- Traslados/reasignación e identidad reservada/adolescentes siguen pendientes de definición.
-- Esta entrega descarga la plantilla; todavía no importa respuestas, valida reglas condicionales ministeriales ni confirma entrega de fiscalía. Es el siguiente paso.
-- Excel se genera en memoria y sólo se guarda bitácora de descarga; no escribe en RND ni guarda archivos en BD.
+El catálogo temporal de FGR se eliminó. No se necesita catálogo de fiscalías: los usuarios se vinculan a una entidad o a alcance nacional. Las instituciones históricas en accesos existentes se ignoran para este módulo; al guardar un usuario de fiscalía se limpia su institución.
+
+La carga, validación condicional y confirmación de respuestas ministeriales se implementarán después. Traslados/reasignación e identidad reservada/adolescentes siguen pendientes de definición.
+
+No se consultan ni modifican fuentes RND en esta descarga: se usan los cruces guardados en EficienciaMinisterial. Excel se genera en memoria y se registra la descarga en bitácora.

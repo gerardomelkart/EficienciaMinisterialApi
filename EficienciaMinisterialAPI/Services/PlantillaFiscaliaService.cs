@@ -7,43 +7,50 @@ namespace EficienciaMinisterialAPI.Services;
 
 public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
 {
-    // PENDIENTE: sustituir este catálogo temporal por fiscalías autorizadas desde BD.
-    public static readonly object[] Fiscalias = [new { codigo = "FGR", nombre = "Fiscalía General de la República" }];
-
     public static bool TieneAcceso(UsuarioInfo usuario) => usuario.Rol == "SUPER_USUARIO"
-        || (usuario.Rol == "FISCALIA" && usuario.Institucion == "FGR" && usuario.Ambito == "NACIONAL");
+        || (usuario.Rol == "FISCALIA" && (usuario.Ambito == "NACIONAL"
+            || (usuario.Ambito == "ESTATAL" && usuario.Entidad is >= 1 and <= 32)));
+
+    private static object Alcance(UsuarioInfo usuario, DateTime? inicio = null, DateTime? fin = null) => new
+    {
+        Nacional = usuario.Rol == "SUPER_USUARIO" || usuario.Ambito == "NACIONAL",
+        usuario.Entidad, inicio = inicio?.Date, fin = fin?.Date
+    };
 
     private const string Elegibles = """
         c.estado = 'CONFIRMADA' AND c.vigente = 1
-        AND r.estado_cruce = 'LOCALIZADO' AND r.tipo_fuero = 'FF'
+        AND r.estado_cruce = 'LOCALIZADO'
+        AND (@Nacional = 1 OR r.entidad = @Entidad)
         """;
 
-    public async Task<object> CatalogosAsync()
+    public async Task<object> CatalogosAsync(UsuarioInfo usuario)
     {
+        if(!TieneAcceso(usuario)) throw new UnauthorizedAccessException();
         await using var db = await factory.AbrirAsync();
         var periodos = (await db.QueryAsync<PeriodoInfo>($"""
             SELECT DISTINCT c.periodo_inicio AS Inicio, c.periodo_fin AS Fin
             FROM primer_respondiente.carga c JOIN primer_respondiente.registro r ON r.id_carga = c.id
             WHERE {Elegibles} ORDER BY Inicio DESC;
-            """)).ToList();
-        return new { fiscalias = Fiscalias, periodos };
+            """, Alcance(usuario))).ToList();
+        return new { periodos };
     }
 
     public async Task<(byte[]? Archivo, int Total)> DescargarAsync(UsuarioInfo usuario, DateTime inicio, DateTime fin)
     {
+        if(!TieneAcceso(usuario)) throw new UnauthorizedAccessException();
         await using var db = await factory.AbrirAsync();
         var filas = (await db.QueryAsync<FilaInformePr>($"""
             SELECT c.periodo_inicio AS PeriodoInicio, c.periodo_fin AS PeriodoFin,
                 c.folio AS FolioEntrega, i.nombre AS Corporacion, r.folio_rnd AS FolioRnd,
                 r.fecha_detencion AS FechaDetencion, r.nombre_detenido AS NombreDetenido,
                 e.nombre AS Entidad, r.autoridad_puesta AS AutoridadPuesta,
-                'Federal' AS Fuero
+                CASE WHEN r.tipo_fuero = 'FF' THEN 'Federal' ELSE 'Común' END AS Fuero
             FROM primer_respondiente.carga c JOIN primer_respondiente.registro r ON r.id_carga = c.id
             JOIN catalogo.institucion i ON i.codigo = c.institucion
             JOIN catalogo.entidad e ON e.id = r.entidad
             WHERE {Elegibles} AND c.periodo_inicio = @inicio AND c.periodo_fin = @fin
             ORDER BY c.institucion, r.entidad, c.folio, r.fila;
-            """, new { inicio = inicio.Date, fin = fin.Date }, commandTimeout: 180)).ToList();
+            """, Alcance(usuario, inicio, fin), commandTimeout: 180)).ToList();
         if(filas.Count == 0) return (null, 0);
         if(filas.Count > XLHelper.MaxRowNumber - 2) throw new ArgumentException("Seleccione un periodo con menos registros para generar Excel.");
         var opciones = (await db.QueryAsync<Opcion>("""
@@ -107,7 +114,7 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
         }
         catalogos.Columns().Width = 65; catalogos.RangeUsed()!.Style.Alignment.WrapText = true;
         var guia = libro.AddWorksheet("Instrucciones");
-        string[] instrucciones = ["Plantilla de seguimiento — Fiscalía General de la República", "Complete únicamente los campos verdes de Seguimiento. Conserve los datos reportados y todas las filas, incluso folios repetidos.", "Las fechas deben capturarse como fechas de Excel: dd/mm/aaaa. Seleccione los motivos y medidas en las listas de Catálogos.", "La plantilla incluye sólo entregas confirmadas y vigentes del periodo seleccionado, de fuero federal y localizadas en RND. No incluye faltas administrativas ni registros no localizados o pendientes.", "Los datos originales se conservan como fueron reportados; el folio informado puede estar vacío aunque la persona haya sido localizada por nombre y fecha.", "Esta descarga no confirma una respuesta ministerial. La carga y validación de respuestas se integrarán en el siguiente paso."];
+        string[] instrucciones = ["Plantilla de seguimiento de fiscalía", "Complete únicamente los campos verdes de Seguimiento. Conserve los datos reportados y todas las filas, incluso folios repetidos.", "Las fechas deben capturarse como fechas de Excel: dd/mm/aaaa. Seleccione los motivos y medidas en las listas de Catálogos.", "La plantilla incluye sólo entregas confirmadas y vigentes del periodo seleccionado, localizadas en RND y dentro del alcance territorial de su usuario. No incluye faltas administrativas ni registros no localizados o pendientes.", "Los datos originales se conservan como fueron reportados; el folio informado puede estar vacío aunque la persona haya sido localizada por nombre y fecha.", "Esta descarga no confirma una respuesta ministerial. La carga y validación de respuestas se integrarán en el siguiente paso."];
         for(var j = 0; j < instrucciones.Length; j++) guia.Cell(j + 1, 1).Value = instrucciones[j];
         guia.Column(1).Width = 110; guia.Column(1).Style.Alignment.WrapText = true;
         for(var j = 1; j <= instrucciones.Length; j++) guia.Row(j).Height = j == 1 ? 30 : 60;
