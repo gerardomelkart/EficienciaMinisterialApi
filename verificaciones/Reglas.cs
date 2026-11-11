@@ -88,6 +88,30 @@ Probar("Reporte PR Excel incluye resumen y detalle y conserva textos sin fórmul
     Ver(libro.Worksheet("Registros").Cell(2, 12).GetString() == "SI", "Falta bandera de duplicado");
     Ver(libro.Worksheet("Resumen").Cell(2, 9).GetValue<int>() == 1, "Pendientes no deben presentarse como no localizados");
 });
+Probar("Plantilla fiscalía restringida al acceso federal autorizado", () =>
+{
+    Ver(PlantillaFiscaliaService.TieneAcceso(new() { Rol = "SUPER_USUARIO" }), "Superusuario sin acceso");
+    Ver(PlantillaFiscaliaService.TieneAcceso(new() { Rol = "FISCALIA", Institucion = "FGR", Ambito = "NACIONAL" }), "FGR federal sin acceso");
+    foreach(var u in new UsuarioInfo[] {
+        new() { Rol = "PRIMER_RESPONDIENTE", Institucion = "FGR", Ambito = "NACIONAL" },
+        new() { Rol = "CONSULTA", Institucion = "FGR", Ambito = "NACIONAL" },
+        new() { Rol = "FISCALIA", Institucion = "FGR", Ambito = "ESTATAL", Entidad = 9 },
+        new() { Rol = "FISCALIA", Institucion = "OTRA", Ambito = "NACIONAL" }
+    }) Ver(!PlantillaFiscaliaService.TieneAcceso(u), "Acceso ajeno autorizado");
+});
+Probar("Plantilla fiscalía conserva filas y deja seguimiento vacío con listas ministeriales", () =>
+{
+    var registro = new FilaInformePr { PeriodoInicio = new(2026, 10, 1), PeriodoFin = new(2026, 10, 15),
+        FolioRnd = "", FolioEntrega = "EM-PR-2026-1", NombreDetenido = "=1+1", FechaDetencion = new(2026, 9, 30) };
+    using var libro = new XLWorkbook(new MemoryStream(PlantillaFiscaliaService.Crear([registro, registro], [new() { Grupo = "MEDIDA_CAUTELAR", Descripcion = "Prueba" }])));
+    var hoja = libro.Worksheet("Seguimiento");
+    Ver(hoja.LastRowUsed()!.RowNumber() == 4, "Se perdieron filas repetidas");
+    Ver(hoja.Cell(3, 7).GetString() == "=1+1" && !hoja.Cell(3, 7).HasFormula, "Texto convertido a fórmula");
+    Ver(hoja.Cell(3, 6).GetDateTime() == new DateTime(2026, 9, 30), "Fecha original alterada");
+    Ver(hoja.Range(3, 11, 4, 23).Cells().All(c => c.IsEmpty()), "Respuesta ministerial precargada");
+    Ver(hoja.DataValidations.Any(), "Faltan listas de captura");
+    Ver(libro.Worksheets.Count == 3, "Faltan catálogos o instrucciones");
+});
 UsuarioInfo usuario = new() { Institucion = "SEDENA", Ambito = "ESTATAL", Entidad = 9 };
 // Datos sintéticos exclusivos de estas pruebas. La aplicación obtiene los catálogos desde SQL.
 var catalogo = new CatalogoCaptura
