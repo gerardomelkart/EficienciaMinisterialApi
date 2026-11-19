@@ -1,0 +1,86 @@
+using ClosedXML.Excel;
+using EficienciaMinisterialAPI.Models;
+using System.Text.Json;
+using static EficienciaMinisterialAPI.Services.PlantillaFiscaliaService;
+
+namespace EficienciaMinisterialAPI.Services;
+
+public sealed record IncidenciaFiscalia(int? Fila, string Campo, string Detalle);
+
+public sealed class ValidacionFiscalia(int esperados)
+{
+    public int Esperados { get; } = esperados;
+    public int Recibidos { get; private set; }
+    public int NoRecibidos { get; private set; }
+    public List<IncidenciaFiscalia> Errores { get; } = [];
+
+    private static string Fecha(DateTime valor) => valor.ToString("yyyy-MM-dd HH:mm:ss");
+    private static string Clave(params string[] valores) => JsonSerializer.Serialize(valores);
+    private static string ClaveOrigen(FilaInformePr r) => Clave(Fecha(r.PeriodoInicio), Fecha(r.PeriodoFin),
+        r.FolioEntrega, r.Corporacion, r.FolioRnd, Fecha(r.FechaDetencion), r.NombreDetenido, r.Entidad, r.AutoridadPuesta, r.Fuero);
+
+    public static ValidacionFiscalia Revisar(XLWorkbook libro, List<FilaInformePr> filas, List<Opcion> opciones)
+    {
+        var resultado = new ValidacionFiscalia(filas.Count);
+        var columnas = Origen.Concat(Respuesta).ToArray();
+        if(!libro.TryGetWorksheet("Seguimiento", out var hoja)
+            || columnas.Where((titulo, i) => hoja.Cell(2, i + 1).GetString() != titulo).Any())
+        {
+            resultado.Errores.Add(new(null, "Plantilla", "Descargue la plantilla vigente y conserve sus encabezados."));
+            return resultado;
+        }
+        var pendientes = filas.CountBy(ClaveOrigen).ToDictionary();
+        var listas = opciones.ToLookup(x => x.Grupo, x => x.Descripcion.Trim());
+        foreach(var fila in hoja.RowsUsed(XLCellsUsedOptions.Contents).Where(r => r.RowNumber() >= 3))
+        {
+            string Valor(int col) => fila.Cell(col).HasFormula ? "[fórmula]" : fila.Cell(col).GetString().Trim();
+            void Error(int col, string mensaje) => resultado.Errores.Add(new(fila.RowNumber(), columnas[col - 1], mensaje));
+            var clave = Clave(Enumerable.Range(1, Origen.Length).Select(i => {
+                var c = fila.Cell(i);
+                if(c.HasFormula) return "[fórmula]";
+                return i is 1 or 2 or 6 && c.DataType == XLDataType.DateTime ? Fecha(c.GetDateTime()) : c.GetString();
+            }).ToArray());
+            if(pendientes.GetValueOrDefault(clave) <= 0)
+            {
+                resultado.Errores.Add(new(fila.RowNumber(), "Precarga", "Fila repetida, modificada o ajena a la precarga vigente."));
+                continue;
+            }
+            pendientes[clave]--;
+            string Binaria(int col)
+            {
+                var valor = Valor(col).ToUpperInvariant();
+                if(valor is "SI" or "SÍ") return "Sí";
+                if(valor == "NO") return "No";
+                Error(col, "Seleccione Sí o No.");
+                return "";
+            }
+            var recibido = Binaria(11);
+            if(recibido == "No") resultado.NoRecibidos++;
+            if(recibido != "Sí") continue;
+            resultado.Recibidos++;
+            var respuestas = Binarias.Skip(1).ToDictionary(c => c, Binaria);
+            foreach(var (grupo, col) in Grupos)
+            {
+                var valor = Valor(col);
+                if(valor.Length == 0)
+                {
+                    if(col == 13 && respuestas[12] == "Sí" || col == 16 && respuestas[15] == "No" || col == 18 && respuestas[17] == "No")
+                        Error(col, "Seleccione el motivo correspondiente.");
+                    continue;
+                }
+                var valores = col == 20 ? valor.Split(';', StringSplitOptions.TrimEntries) : new[] { valor };
+                foreach(var opcion in valores)
+                {
+                    if(!listas[grupo].Contains(opcion, StringComparer.OrdinalIgnoreCase)) Error(col, "Use una opción del catálogo.");
+                    else if(col == 20 && opcion.StartsWith("XIV.", StringComparison.OrdinalIgnoreCase) && respuestas[19] == "No")
+                        Error(col, "Seleccionó prisión preventiva y respondió No en prisión preventiva.");
+                }
+            }
+        }
+        var faltantes = pendientes.Values.Sum();
+        if(faltantes > 0) resultado.Errores.Add(new(null, "Precarga", $"Faltan {faltantes} filas originales de la precarga vigente."));
+        if(resultado.Recibidos + resultado.NoRecibidos != filas.Count)
+            resultado.Errores.Add(new(null, "Recibido por fiscalía", "La suma de Sí y No debe coincidir con el total precargado."));
+        return resultado;
+    }
+}
