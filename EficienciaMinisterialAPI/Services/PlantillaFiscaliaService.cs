@@ -49,8 +49,14 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
     {
         if(!TieneAcceso(usuario)) throw new UnauthorizedAccessException();
         await using var db = await factory.AbrirAsync();
+        return await LeerAsync(usuario, inicio, fin, db, null);
+    }
+
+    private static async Task<(List<FilaInformePr> Filas, List<Opcion> Opciones)> LeerAsync(UsuarioInfo usuario, DateTime inicio, DateTime fin,
+        Microsoft.Data.SqlClient.SqlConnection db, System.Data.Common.DbTransaction? tx)
+    {
         var filas = (await db.QueryAsync<FilaInformePr>($"""
-            SELECT c.periodo_inicio AS PeriodoInicio, c.periodo_fin AS PeriodoFin,
+            SELECT r.id AS IdRegistro, c.periodo_inicio AS PeriodoInicio, c.periodo_fin AS PeriodoFin,
                 c.folio AS FolioEntrega, i.nombre AS Corporacion, r.folio_rnd AS FolioRnd,
                 r.fecha_detencion AS FechaDetencion, r.nombre_detenido AS NombreDetenido,
                 e.nombre AS Entidad, r.autoridad_puesta AS AutoridadPuesta,
@@ -60,14 +66,62 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
             JOIN catalogo.entidad e ON e.id = r.entidad
             WHERE {Elegibles} AND c.periodo_inicio = @inicio AND c.periodo_fin = @fin
             ORDER BY c.institucion, r.entidad, c.folio, r.fila;
-            """, Alcance(usuario, inicio, fin), commandTimeout: 180)).ToList();
+            """, Alcance(usuario, inicio, fin), transaction: tx, commandTimeout: 180)).ToList();
         if(filas.Count > XLHelper.MaxRowNumber - 2) throw new ArgumentException("Seleccione un periodo con menos registros para generar Excel.");
         var opciones = (await db.QueryAsync<Opcion>("""
             SELECT grupo AS Grupo, descripcion AS Descripcion FROM catalogo.opcion_ministerial
             WHERE activo = 1 AND (grupo <> 'DESCRIPCION_CONCLUSION' OR id BETWEEN 1 AND 13)
             ORDER BY grupo, id;
-            """)).ToList();
+            """, transaction: tx)).ToList();
         return (filas, opciones);
+    }
+
+    public sealed record Entrega(long Id, DateTime Inicio, DateTime Fin, DateTime Fecha, int Recibidos, int NoRecibidos, byte? Entidad)
+    {
+        public string Folio => $"EM-FIS-{Inicio:yyyy}-{Id}";
+    }
+
+    private const string CamposEntrega = "id, inicio, fin, fecha, recibidos, no_recibidos AS NoRecibidos, entidad";
+
+    public async Task<Entrega?> AcuseAsync(UsuarioInfo usuario, long id)
+    {
+        await using var db = await factory.AbrirAsync();
+        return await db.QuerySingleOrDefaultAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WHERE id=@id AND (@nacional=1 OR entidad=@entidad)",
+            new { id, nacional = usuario.Rol == "SUPER_USUARIO" || usuario.Ambito == "NACIONAL", usuario.Entidad });
+    }
+
+    public async Task<(Entrega? Entrega, ValidacionFiscalia? Revision)> ConfirmarAsync(UsuarioInfo usuario, DateTime inicio, DateTime fin, XLWorkbook libro)
+    {
+        await using var db = await factory.AbrirAsync();
+        await using var tx = await db.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+        byte? entidad = usuario.Rol == "SUPER_USUARIO" || usuario.Ambito == "NACIONAL" ? null : usuario.Entidad;
+        var parametros = new { inicio = inicio.Date, fin = fin.Date, entidad };
+        var previa = await db.QuerySingleOrDefaultAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WITH (UPDLOCK,HOLDLOCK) WHERE inicio=@inicio AND fin=@fin AND (entidad=@entidad OR (entidad IS NULL AND @entidad IS NULL))", parametros, tx);
+        var (filas, opciones) = await LeerAsync(usuario, inicio, fin, db, tx);
+        var revision = ValidacionFiscalia.Revisar(libro, filas, opciones);
+        if(filas.Count == 0 || revision.Errores.Count != 0) return (null, revision);
+        var json = System.Text.Json.JsonSerializer.Serialize(revision.Respuestas);
+        var huella = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json));
+        if(previa != null)
+        {
+            var guardada = await db.QuerySingleAsync<byte[]>("SELECT huella FROM fiscalia.entrega WHERE id=@Id", previa, tx);
+            return (guardada.SequenceEqual(huella) ? previa : null, null);
+        }
+        var entrega = await db.QuerySingleAsync<Entrega>($"""
+            INSERT fiscalia.entrega(inicio,fin,entidad,usuario,recibidos,no_recibidos,huella)
+            VALUES(@inicio,@fin,@entidad,@usuario,@recibidos,@noRecibidos,@huella);
+            SELECT {CamposEntrega} FROM fiscalia.entrega WHERE id=SCOPE_IDENTITY();
+            """, new { parametros.inicio, parametros.fin, entidad, usuario = usuario.Id, revision.Recibidos, revision.NoRecibidos, huella }, tx);
+        using var tabla = new System.Data.DataTable();
+        tabla.Columns.Add("entrega", typeof(long)); tabla.Columns.Add("registro", typeof(long)); tabla.Columns.Add("datos", typeof(string));
+        foreach(var (registro, datos) in revision.Respuestas) tabla.Rows.Add(entrega.Id, registro, System.Text.Json.JsonSerializer.Serialize(datos));
+        using var copia = new Microsoft.Data.SqlClient.SqlBulkCopy(db, Microsoft.Data.SqlClient.SqlBulkCopyOptions.CheckConstraints, (Microsoft.Data.SqlClient.SqlTransaction)tx);
+        copia.DestinationTableName = "fiscalia.respuesta";
+        foreach(System.Data.DataColumn col in tabla.Columns) copia.ColumnMappings.Add(col.ColumnName, col.ColumnName);
+        await copia.WriteToServerAsync(tabla);
+        await db.ExecuteAsync("INSERT seguridad.bitacora(id_usuario,accion) VALUES(@Id,'CONFIRMAR_ENTREGA_FISCALIA')", new { usuario.Id }, tx);
+        await tx.CommitAsync();
+        return (entrega, null);
     }
 
     public sealed class Opcion

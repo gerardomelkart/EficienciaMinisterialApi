@@ -9,6 +9,7 @@ public sealed record IncidenciaFiscalia(int? Fila, string Campo, string Detalle)
 
 public sealed class ValidacionFiscalia(int esperados)
 {
+    internal SortedDictionary<long, Dictionary<string,string>> Respuestas { get; } = new();
     public int Esperados { get; } = esperados;
     public int Recibidos { get; private set; }
     public int NoRecibidos { get; private set; }
@@ -32,8 +33,8 @@ public sealed class ValidacionFiscalia(int esperados)
             resultado.Errores.Add(new(null, "Plantilla", "Descargue la plantilla vigente y conserve sus encabezados."));
             return resultado;
         }
-        var pendientes = filas.CountBy(ClaveOrigen).ToDictionary();
-        var listas = opciones.ToLookup(x => x.Grupo, x => TextoComparable(x.Descripcion));
+        var pendientes = filas.GroupBy(ClaveOrigen).ToDictionary(g => g.Key, g => new Queue<long>(g.Select(f => f.IdRegistro)));
+        var listas = opciones.ToLookup(x => x.Grupo);
         foreach(var fila in hoja.RowsUsed(XLCellsUsedOptions.Contents).Where(r => r.RowNumber() >= 3))
         {
             string Valor(int col) => fila.Cell(col).HasFormula ? "[fórmula]" : fila.Cell(col).GetString().Trim();
@@ -43,12 +44,12 @@ public sealed class ValidacionFiscalia(int esperados)
                 if(c.HasFormula) return "[fórmula]";
                 return i is 1 or 2 or 6 && c.DataType == XLDataType.DateTime ? Fecha(c.GetDateTime()) : c.GetString();
             }).ToArray());
-            if(pendientes.GetValueOrDefault(clave) <= 0)
+            if(!pendientes.TryGetValue(clave, out var ids) || !ids.TryDequeue(out var registro))
             {
                 resultado.Errores.Add(new(fila.RowNumber(), "Precarga", "Fila repetida, modificada o ajena a la precarga vigente."));
                 continue;
             }
-            pendientes[clave]--;
+
             string Binaria(int col)
             {
                 var valor = TextoComparable(Valor(col));
@@ -58,10 +59,13 @@ public sealed class ValidacionFiscalia(int esperados)
                 return "";
             }
             var recibido = Binaria(11);
+            var datos = new Dictionary<string,string> { [columnas[10]] = recibido, [columnas[24]] = Valor(25) };
+            resultado.Respuestas[registro] = datos;
             if(recibido == "No") resultado.NoRecibidos++;
             if(recibido != "Sí") continue;
             resultado.Recibidos++;
             var respuestas = Binarias.Skip(1).ToDictionary(c => c, Binaria);
+            foreach(var (columna, respuesta) in respuestas) datos[columnas[columna - 1]] = respuesta;
             foreach(var (grupo, col) in Grupos)
             {
                 var valor = Valor(col);
@@ -72,16 +76,20 @@ public sealed class ValidacionFiscalia(int esperados)
                     continue;
                 }
                 var valores = col == 20 ? valor.Split(';', StringSplitOptions.TrimEntries) : new[] { valor };
+                var canonicas = new List<string>();
                 foreach(var opcion in valores)
                 {
                     var claveOpcion = TextoComparable(opcion);
-                    if(claveOpcion.Length == 0 || !listas[grupo].Contains(claveOpcion)) Error(col, "Use una opción del catálogo.");
+                    var oficial = listas[grupo].FirstOrDefault(o => TextoComparable(o.Descripcion) == claveOpcion);
+                    if(oficial != null) canonicas.Add(oficial.Descripcion);
+                    if(claveOpcion.Length == 0 || oficial == null) Error(col, "Use una opción del catálogo.");
                     else if(col == 20 && claveOpcion == "XIVPRISIONPREVENTIVA" && respuestas[19] == "No")
                         Error(col, "Seleccionó prisión preventiva y respondió No en prisión preventiva.");
                 }
+                datos[columnas[col - 1]] = string.Join("; ", canonicas);
             }
         }
-        var faltantes = pendientes.Values.Sum();
+        var faltantes = pendientes.Values.Sum(q => q.Count);
         if(faltantes > 0) resultado.Errores.Add(new(null, "Precarga", $"Faltan {faltantes} filas originales de la precarga vigente."));
         if(resultado.Recibidos + resultado.NoRecibidos != filas.Count)
             resultado.Errores.Add(new(null, "Recibido por fiscalía", "La suma de Sí y No debe coincidir con el total precargado."));

@@ -59,6 +59,22 @@ public sealed class AcuseCargaService
         return doc.Generar();
     }
 
+    public static byte[] CrearFiscalia(PlantillaFiscaliaService.Entrega entrega)
+    {
+        var doc = new AcuseCargaService();
+        doc.NuevaPagina();
+        var fecha = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(entrega.Fecha, DateTimeKind.Utc),
+            TimeZoneInfo.FindSystemTimeZoneById("Central Standard Time (Mexico)"));
+        doc.Parrafo("ACUSE DE RECEPCIÓN DE FISCALÍA", 15, 24);
+        doc.Parrafo($"Folio: {entrega.Folio}", 12, 20);
+        doc.Parrafo($"Periodo de entrega: {entrega.Inicio:dd/MM/yyyy} al {entrega.Fin:dd/MM/yyyy}", 12, 20);
+        doc.Parrafo(entrega.Entidad.HasValue ? $"Alcance estatal. Clave de entidad: {entrega.Entidad:00}" : "Alcance nacional", 12, 20);
+        doc.Parrafo($"Recepción (hora de México): {fecha:dd/MM/yyyy HH:mm:ss}", 12, 20);
+        doc.Parrafo($"Detenciones precargadas: {entrega.Recibidos + entrega.NoRecibidos}", 12, 20);
+        doc.Parrafo($"Recibidas: {entrega.Recibidos}. No recibidas: {entrega.NoRecibidos}.", 12, 20);
+        return doc.Generar();
+    }
+
     private void NuevaPagina()
     {
         if (contenido.Length > 0) paginas.Add(contenido);

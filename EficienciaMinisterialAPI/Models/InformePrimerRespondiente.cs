@@ -44,6 +44,8 @@ public sealed class ResumenInformePr : TotalesInformePr
 }
 public sealed class FilaInformePr
 {
+    [System.Text.Json.Serialization.JsonIgnore]
+    public long IdRegistro { get; set; }
     public DateTime PeriodoInicio { get; set; }
     public DateTime PeriodoFin { get; set; }
     public string FolioEntrega { get; set; } = "";

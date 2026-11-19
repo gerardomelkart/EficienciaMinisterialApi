@@ -33,14 +33,29 @@ public sealed class FiscaliasController(PlantillaFiscaliaService plantillas) : C
 
     [HttpPost("validar")]
     [RequestSizeLimit(32 * 1024 * 1024)]
-    public async Task<IActionResult> Validar([FromQuery] DateTime inicio, [FromQuery] DateTime fin, IFormFile archivo)
+    public Task<IActionResult> Validar([FromQuery] DateTime inicio, [FromQuery] DateTime fin, IFormFile archivo)
+        => Procesar(inicio, fin, archivo, false);
+
+    [HttpPost("confirmar")]
+    [RequestSizeLimit(32 * 1024 * 1024)]
+    public Task<IActionResult> Confirmar([FromQuery] DateTime inicio, [FromQuery] DateTime fin, IFormFile archivo)
+        => Procesar(inicio, fin, archivo, true);
+
+    [HttpGet("entregas/{id:long}/acuse")]
+    public async Task<IActionResult> Acuse(long id)
+    {
+        if(!PlantillaFiscaliaService.TieneAcceso(Usuario)) return Forbid();
+        var entrega = await plantillas.AcuseAsync(Usuario, id);
+        if(entrega == null) return NotFound();
+        return File(AcuseCargaService.CrearFiscalia(entrega), "application/pdf", $"Acuse_Fiscalia_{entrega.Inicio:dd-MM-yyyy}_al_{entrega.Fin:dd-MM-yyyy}.pdf");
+    }
+
+    private async Task<IActionResult> Procesar(DateTime inicio, DateTime fin, IFormFile archivo, bool confirmar)
     {
         if(!PlantillaFiscaliaService.TieneAcceso(Usuario)) return Forbid();
         if(inicio == default || fin < inicio || archivo.Length == 0 ||
             !string.Equals(Path.GetExtension(archivo.FileName), ".xlsx", StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { mensaje = "Seleccione un periodo y un archivo .xlsx." });
-        var (filas, opciones) = await plantillas.ObtenerDatosAsync(Usuario, inicio, fin);
-        if(filas.Count == 0) return BadRequest(new { mensaje = "No hay una precarga vigente para este periodo." });
         using var entrada = archivo.OpenReadStream();
         ClosedXML.Excel.XLWorkbook libro;
         try { libro = new ClosedXML.Excel.XLWorkbook(entrada); }
@@ -48,6 +63,18 @@ public sealed class FiscaliasController(PlantillaFiscaliaService plantillas) : C
         {
             return BadRequest(new { mensaje = "No se pudo leer el Excel. Use la plantilla descargada." });
         }
-        using(libro) return Ok(ValidacionFiscalia.Revisar(libro, filas, opciones));
+        using(libro)
+        {
+            if(confirmar)
+            {
+                var (entrega, revision) = await plantillas.ConfirmarAsync(Usuario, inicio, fin, libro);
+                if(entrega != null) return Ok(entrega);
+                return Conflict(new { mensaje = revision == null ? "Ya existe una entrega confirmada para este periodo y alcance." :
+                    "La precarga cambió o hay respuestas por corregir. Revise el archivo antes de confirmar.", revision });
+            }
+            var (filas, opciones) = await plantillas.ObtenerDatosAsync(Usuario, inicio, fin);
+            if(filas.Count == 0) return BadRequest(new { mensaje = "No hay una precarga vigente para este periodo." });
+            return Ok(ValidacionFiscalia.Revisar(libro, filas, opciones));
+        }
     }
 }
