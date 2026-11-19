@@ -104,7 +104,13 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
         hoja.Range(1, 11, 2, encabezados.Length).Style.Fill.BackgroundColor = XLColor.FromHtml("#235b4e");
         hoja.Range(1, 1, 2, encabezados.Length).Style.Font.FontColor = XLColor.White;
         hoja.Range(1, 1, 2, encabezados.Length).Style.Font.Bold = true;
-        hoja.Range(3, 11, ultima, encabezados.Length).Style.Fill.BackgroundColor = XLColor.FromHtml("#eaf3ec");
+        var captura = hoja.Range(3, 11, ultima, encabezados.Length);
+        captura.Style.Fill.BackgroundColor = XLColor.FromHtml("#eaf3ec");
+        var colorLinea = XLColor.FromHtml("#abc1b4");
+        captura.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        captura.Style.Border.InsideBorderColor = colorLinea;
+        captura.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        captura.Style.Border.OutsideBorderColor = colorLinea;
         hoja.Columns().Width = 25;
         hoja.Column(7).Width = 42; hoja.Column(9).Width = 45;
         hoja.RangeUsed()!.Style.Alignment.WrapText = true;
