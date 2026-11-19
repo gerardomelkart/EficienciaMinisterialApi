@@ -58,11 +58,13 @@ public sealed class CatalogoRepository(SqlConnectionFactory factory, ILogger<Cat
             IF NOT EXISTS(SELECT 1 FROM primer_respondiente.periodo WHERE @hoy BETWEEN inicio AND fin)
                 EXEC primer_respondiente.GenerarPeriodos;
             SELECT p.id, p.inicio, p.fin FROM primer_respondiente.periodo p
-            WHERE p.habilitado = 1 AND p.cerrado = 0
+            WHERE (EXISTS(SELECT 1 FROM primer_respondiente.carga a WHERE a.estado='CONFIRMADA' AND a.vigente=1 AND a.reabierta=1
+                AND a.periodo_inicio=p.inicio AND a.periodo_fin=p.fin AND (a.institucion=@Institucion OR (@PuedeReemplazar=1 AND @Institucion IS NULL)))
+                OR (p.habilitado = 1 AND p.cerrado = 0
                 AND (@PuedeReemplazar = 1 OR NOT EXISTS(
                     SELECT 1 FROM primer_respondiente.carga c
                     WHERE c.institucion = @Institucion AND c.estado = 'CONFIRMADA' AND c.vigente = 1
-                        AND (c.id_periodo = p.id OR (c.id_periodo IS NULL AND c.periodo_inicio = p.inicio AND c.periodo_fin = p.fin))))
+                        AND (c.id_periodo = p.id OR (c.id_periodo IS NULL AND c.periodo_inicio = p.inicio AND c.periodo_fin = p.fin))))))
             ORDER BY p.inicio DESC;
             """, new { usuario.Institucion, PuedeReemplazar = usuario.Rol == "SUPER_USUARIO" });
         logger.LogInformation("Catálogo de periodos: conexión {ConexionMs} ms; consulta {ConsultaMs} ms; total {TotalMs} ms", conexionMs, reloj.ElapsedMilliseconds - conexionMs, reloj.ElapsedMilliseconds);

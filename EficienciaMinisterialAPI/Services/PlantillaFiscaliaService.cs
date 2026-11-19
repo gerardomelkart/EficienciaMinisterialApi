@@ -33,7 +33,8 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
             WHERE {Elegibles} ORDER BY Inicio DESC;
             """, Alcance(usuario))).ToList();
         var entregas = (await db.QueryAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WHERE (@Nacional=1 AND entidad IS NULL) OR (@Nacional=0 AND entidad=@Entidad) ORDER BY inicio DESC", Alcance(usuario))).ToList();
-        var confirmados = entregas.Select(e => (e.Inicio, e.Fin)).ToHashSet();
+        var bloqueadas = await db.QueryAsync<PeriodoInfo>("SELECT inicio, fin FROM fiscalia.entrega WHERE vigente=1 AND reabierta=0 AND ((@Nacional=1 AND entidad IS NULL) OR (@Nacional=0 AND entidad=@Entidad))", Alcance(usuario));
+        var confirmados = bloqueadas.Select(p => (p.Inicio, p.Fin)).ToHashSet();
         periodos.RemoveAll(p => confirmados.Contains((p.Inicio, p.Fin)));
         return new { periodos, entregas };
     }
@@ -89,7 +90,7 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
     public async Task<Entrega?> EntregaPeriodoAsync(UsuarioInfo usuario, DateTime inicio, DateTime fin)
     {
         await using var db = await factory.AbrirAsync();
-        return await db.QuerySingleOrDefaultAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WHERE inicio=@inicio AND fin=@fin AND ((@Nacional=1 AND entidad IS NULL) OR (@Nacional=0 AND entidad=@Entidad))",
+        return await db.QuerySingleOrDefaultAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WHERE vigente=1 AND reabierta=0 AND inicio=@inicio AND fin=@fin AND ((@Nacional=1 AND entidad IS NULL) OR (@Nacional=0 AND entidad=@Entidad))",
             Alcance(usuario, inicio, fin));
     }
 
@@ -106,13 +107,23 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
         await using var tx = await db.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         byte? entidad = usuario.Rol == "SUPER_USUARIO" || usuario.Ambito == "NACIONAL" ? null : usuario.Entidad;
         var parametros = new { inicio = inicio.Date, fin = fin.Date, entidad };
-        var previa = await db.QuerySingleOrDefaultAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WITH (UPDLOCK,HOLDLOCK) WHERE inicio=@inicio AND fin=@fin AND (entidad=@entidad OR (entidad IS NULL AND @entidad IS NULL))", parametros, tx);
-        if(previa != null) return (null, null);
+        var previa = await db.QuerySingleOrDefaultAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WITH (UPDLOCK,HOLDLOCK) WHERE vigente=1 AND inicio=@inicio AND fin=@fin AND (entidad=@entidad OR (entidad IS NULL AND @entidad IS NULL))", parametros, tx);
+        if(previa != null && !await db.ExecuteScalarAsync<bool>("SELECT reabierta FROM fiscalia.entrega WHERE id=@Id", previa, tx)) return (null, null);
         var (filas, opciones) = await LeerAsync(usuario, inicio, fin, db, tx);
         var revision = ValidacionFiscalia.Revisar(libro, filas, opciones);
         if(filas.Count == 0 || revision.Errores.Count != 0) return (null, revision);
         var json = System.Text.Json.JsonSerializer.Serialize(revision.Respuestas);
         var huella = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json));
+        if(previa != null)
+        {
+            var anterior = await db.QuerySingleAsync<byte[]>("SELECT huella FROM fiscalia.entrega WHERE id=@Id", previa, tx);
+            if(anterior.SequenceEqual(huella))
+            {
+                revision.Errores.Add(new(null, "Entrega", "Las respuestas son idénticas a la entrega vigente. Cargue la corrección."));
+                return (null, revision);
+            }
+            await db.ExecuteAsync("UPDATE fiscalia.entrega SET vigente=0,reabierta=0 WHERE id=@Id", previa, tx);
+        }
         var entrega = await db.QuerySingleAsync<Entrega>($"""
             INSERT fiscalia.entrega(inicio,fin,entidad,usuario,recibidos,no_recibidos,huella)
             VALUES(@inicio,@fin,@entidad,@usuario,@recibidos,@noRecibidos,@huella);

@@ -18,8 +18,10 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
         await using var tx = (SqlTransaction)await db.BeginTransactionAsync();
         var periodo = await db.QuerySingleOrDefaultAsync<PeriodoInfo>("""
             SELECT id, inicio, fin FROM primer_respondiente.periodo WITH(HOLDLOCK)
-            WHERE id = @idPeriodo AND habilitado = 1 AND cerrado = 0
-            """, new { idPeriodo }, tx);
+            WHERE id = @idPeriodo AND ((habilitado = 1 AND cerrado = 0) OR EXISTS(
+                SELECT 1 FROM primer_respondiente.carga a WHERE a.periodo_inicio=periodo.inicio AND a.periodo_fin=periodo.fin
+                AND a.institucion=@Institucion AND a.vigente=1 AND a.reabierta=1 AND a.estado='CONFIRMADA'))
+            """, new { idPeriodo, usuario.Institucion }, tx);
         if(periodo == null)
         {
             throw new ArgumentException("El periodo no existe, está deshabilitado o ya fue cerrado. Actualice la lista.");
@@ -73,7 +75,7 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
         return db.ExecuteScalarAsync<bool>("""
             SELECT CAST(CASE WHEN EXISTS(
                 SELECT 1 FROM primer_respondiente.carga
-                WHERE institucion = @institucion AND estado = 'CONFIRMADA' AND vigente = 1
+                WHERE institucion = @institucion AND estado = 'CONFIRMADA' AND vigente = 1 AND reabierta=0
                     AND (id_periodo = @Id OR (id_periodo IS NULL AND periodo_inicio = @Inicio AND periodo_fin = @Fin))
             ) THEN 1 ELSE 0 END AS bit)
             """, new { institucion, periodo.Id, periodo.Inicio, periodo.Fin }, tx);
@@ -251,7 +253,9 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
                 SELECT CAST(CASE WHEN EXISTS(
                     SELECT 1 FROM primer_respondiente.periodo p WITH(UPDLOCK, HOLDLOCK)
                     JOIN primer_respondiente.carga c ON c.id_periodo = p.id
-                    WHERE c.id = @id AND p.habilitado = 1 AND p.cerrado = 0
+                    WHERE c.id = @id AND ((p.habilitado = 1 AND p.cerrado = 0) OR EXISTS(
+                        SELECT 1 FROM primer_respondiente.carga a WHERE a.periodo_inicio=p.inicio AND a.periodo_fin=p.fin
+                        AND a.institucion=c.institucion AND a.estado='CONFIRMADA' AND a.vigente=1 AND a.reabierta=1))
                 ) THEN 1 ELSE 0 END AS bit)
                 """, new { id }, tx);
             if(!habilitado)
@@ -265,15 +269,15 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
                 return new(null, "La carga no puede continuar: contiene información ya reportada en otro periodo.", repetidos);
             }
             await db.ExecuteAsync("""
-                UPDATE primer_respondiente.carga SET vigente = 0
-                WHERE id_periodo = @periodoId AND institucion = (SELECT institucion FROM primer_respondiente.carga WHERE id = @id)
+                UPDATE primer_respondiente.carga SET vigente = 0, reabierta=0
+                WHERE (id_periodo = @periodoId OR (id_periodo IS NULL AND periodo_inicio=@Inicio AND periodo_fin=@Fin)) AND institucion = (SELECT institucion FROM primer_respondiente.carga WHERE id = @id)
                     AND estado = 'CONFIRMADA' AND vigente = 1 AND id <> @id;
                 UPDATE primer_respondiente.carga SET estado = 'CONFIRMADA', confirmado_utc = SYSUTCDATETIME(),
                     folio = CONCAT('EM-PR-', YEAR(SYSUTCDATETIME()), '-', NEXT VALUE FOR primer_respondiente.folio_seq)
                 WHERE id = @id;
                 INSERT seguridad.bitacora(id_usuario, accion, id_carga) VALUES(@UsuarioId, 'CONFIRMAR_CARGA', @id);
                 IF @aceptaNoLocalizados = 1 INSERT seguridad.bitacora(id_usuario, accion, id_carga) VALUES(@UsuarioId, 'ACEPTAR_NO_LOCALIZADOS_RND', @id);
-                """, new { id, UsuarioId = usuario.Id, aceptaNoLocalizados, periodoId }, tx);
+                """, new { id, UsuarioId = usuario.Id, aceptaNoLocalizados, periodoId, periodo.Inicio, periodo.Fin }, tx);
             await db.ExecuteAsync("""
                 UPDATE r SET duplicado = CASE WHEN r.folio_rnd <> '' AND EXISTS(
                     SELECT 1 FROM primer_respondiente.registro otro

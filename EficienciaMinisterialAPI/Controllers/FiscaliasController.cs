@@ -101,7 +101,7 @@ public sealed class FiscaliasController(PlantillaFiscaliaService plantillas) : C
                 if(entrega != null) return Ok(entrega);
                 if(revision == null && await plantillas.EntregaPeriodoAsync(Usuario, inicio, fin) is { } previa) return YaConfirmada(previa);
                 return Conflict(new { mensaje = revision == null ? "Ya existe una entrega confirmada para este periodo y alcance." :
-                    "La precarga cambió o hay respuestas por corregir. Revise el archivo antes de confirmar.", revision });
+                    revision.Errores.FirstOrDefault()?.Detalle ?? "La precarga cambió. Revise el archivo antes de confirmar.", revision });
             }
             var (filas, opciones) = await plantillas.ObtenerDatosAsync(Usuario, inicio, fin);
             if(filas.Count == 0) return BadRequest(new { mensaje = "No hay una precarga vigente para este periodo." });
