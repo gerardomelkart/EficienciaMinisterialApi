@@ -59,19 +59,35 @@ public sealed class AcuseCargaService
         return doc.Generar();
     }
 
-    public static byte[] CrearFiscalia(PlantillaFiscaliaService.Entrega entrega)
+    public static byte[] CrearFiscalia(PlantillaFiscaliaService.Entrega entrega, bool previo = false)
     {
-        var doc = new AcuseCargaService();
-        doc.NuevaPagina();
+        var doc = new AcuseCargaService { previo = previo };
         var fecha = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(entrega.Fecha, DateTimeKind.Utc),
             TimeZoneInfo.FindSystemTimeZoneById("Central Standard Time (Mexico)"));
-        doc.Parrafo("ACUSE DE RECEPCIÓN DE FISCALÍA", 15, 24);
-        doc.Parrafo($"Folio: {entrega.Folio}", 12, 20);
-        doc.Parrafo($"Periodo de entrega: {entrega.Inicio:dd/MM/yyyy} al {entrega.Fin:dd/MM/yyyy}", 12, 20);
-        doc.Parrafo(entrega.Entidad.HasValue ? $"Alcance estatal. Clave de entidad: {entrega.Entidad:00}" : "Alcance nacional", 12, 20);
-        doc.Parrafo($"Recepción (hora de México): {fecha:dd/MM/yyyy HH:mm:ss}", 12, 20);
-        doc.Parrafo($"Detenciones precargadas: {entrega.Recibidos + entrega.NoRecibidos}", 12, 20);
-        doc.Parrafo($"Recibidas: {entrega.Recibidos}. No recibidas: {entrega.NoRecibidos}.", 12, 20);
+        doc.NuevaPagina();
+        doc.Texto(fecha.ToString("dd 'de' MMMM 'de' yyyy, HH:mm", Cultura) + " h, Ciudad de México", Derecha, 698, 10, derecha: true);
+        doc.y = 658;
+        doc.Parrafo(previo ? "VISTA PREVIA DEL ACUSE" : "ACUSE DE RECEPCIÓN DE INFORMACIÓN", 15, 22);
+        doc.y -= 12;
+        doc.Parrafo("Fiscalía - Seguimiento ministerial", 12, 18);
+        doc.y -= 16;
+        doc.Parrafo(previo ? "Revise el resumen de las respuestas antes de confirmar la entrega."
+            : "Se hace constar la recepción de las respuestas de seguimiento ministerial correspondientes al periodo indicado.", 11, 16);
+        doc.y -= 20;
+        foreach(var (campo, valor) in new[] {
+            ("Folio", previo ? "Pendiente de confirmación" : entrega.Folio),
+            ("Alcance", entrega.Entidad.HasValue ? $"Estatal · Clave de entidad {entrega.Entidad:00}" : "Nacional"),
+            ("Periodo de entrega", $"{entrega.Inicio:dd/MM/yyyy} al {entrega.Fin:dd/MM/yyyy}"),
+            ("Detenciones precargadas", (entrega.Recibidos + entrega.NoRecibidos).ToString("N0", Cultura)),
+            ("Recibidas por fiscalía", entrega.Recibidos.ToString("N0", Cultura)),
+            ("No recibidas por fiscalía", entrega.NoRecibidos.ToString("N0", Cultura))
+        })
+        {
+            doc.Texto(campo, Izquierda, doc.y, 10, negrita: true);
+            doc.y -= 18;
+            doc.Parrafo(valor, 11, 16);
+            doc.y -= 16;
+        }
         return doc.Generar();
     }
 
