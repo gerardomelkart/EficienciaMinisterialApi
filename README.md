@@ -72,7 +72,7 @@ dotnet user-secrets set "Jwt:Key" "CLAVE_ALEATORIA_DE_AL_MENOS_32_BYTES"
 
 También se admiten las variables `ConnectionStrings__EficienciaMinisterial` y `Jwt__Key`. En servidores usar variables de entorno protegidas y TLS en el proxy. El proxy local debe enviar `X-Forwarded-For` y `X-Forwarded-Proto`; solo se confían proxies de loopback. El servicio escucha en loopback; no necesita CORS si el proxy publica front y API bajo el mismo origen. No hay contraseñas predeterminadas ni usuarios de demostración.
 
-3. Crear el primer superusuario desde una terminal local con acceso a la BD. Definir `EM_ADMIN_USUARIO` y `EM_ADMIN_PASSWORD` en el entorno; la contraseña requiere al menos 12 caracteres y como máximo 72 bytes UTF-8. Ejecutar:
+3. Crear el primer superusuario desde una terminal local con acceso a la BD. Definir `EM_ADMIN_USUARIO` y `EM_ADMIN_PASSWORD` en el entorno; la contraseña requiere al menos 8 caracteres y como máximo 72 bytes UTF-8. Ejecutar:
 
 ```powershell
 dotnet run -- --crear-superusuario
@@ -184,7 +184,7 @@ El formulario multipart mantiene en memoria los archivos hasta el máximo config
 Aplicar `EficienciaMinisterialBD/scripts/007_primer_login.sql` antes de iniciar la API actualizada.
 Las cuentas existentes y nuevas deben cambiar su contraseña antes de acceder a los módulos.
 Las cuentas con cualquier acceso `SUPER_USUARIO` quedan exentas. El cambio exige contraseña actual,
-nueva diferente de al menos 12 caracteres y confirmación; se registra en bitácora.
+nueva diferente de al menos 8 caracteres y confirmación; se registra en bitácora.
 La API bloquea las operaciones hasta completar el cambio. El indicador se desactiva al guardarlo.
 La confirmación rechaza el mismo SHA-256 para una corporación y periodo ya confirmados,
 incluso en solicitudes concurrentes; no se guardan archivos originales.

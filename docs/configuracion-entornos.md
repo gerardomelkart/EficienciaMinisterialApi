@@ -64,7 +64,7 @@ Remove-Variable bytesJwt
 Después de crear la BD, ejecutar los scripts y configurar la conexión:
 
 ```powershell
-$cuentaInicial = Get-Credential -Message 'Nuevo superusuario de Eficiencia Ministerial (contraseña de 12 caracteres o más)'
+$cuentaInicial = Get-Credential -Message 'Nuevo superusuario de Eficiencia Ministerial (contraseña de 8 caracteres o más)'
 $env:EM_ADMIN_USUARIO = $cuentaInicial.UserName
 $env:EM_ADMIN_PASSWORD = $cuentaInicial.GetNetworkCredential().Password
 try

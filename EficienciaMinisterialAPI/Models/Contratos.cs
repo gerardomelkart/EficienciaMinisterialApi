@@ -5,7 +5,7 @@ public sealed record LoginRequest([Required, MaxLength(80)] string Usuario, [Req
 public sealed record CrearUsuarioRequest(
     [Required, MaxLength(80)] string Usuario,
     [Required, MaxLength(200)] string Nombre,
-    [Required, MinLength(12), MaxLength(72)] string Password,
+    [Required, MinLength(8), MaxLength(72)] string Password,
     [Required] string Rol,
     string? Institucion,
     [Required] string Ambito,
@@ -18,7 +18,7 @@ public sealed record ActualizarUsuarioRequest(
     [Required, MinLength(1)] List<AccesoUsuario> Accesos);
 public sealed record CambiarPasswordRequest(
     [Required, MaxLength(200)] string PasswordActual,
-    [Required, MinLength(12), MaxLength(72)] string PasswordNueva,
+    [Required, MinLength(8), MaxLength(72)] string PasswordNueva,
     [Required] string Confirmacion);
 public sealed record SeleccionarAccesoRequest(int IdAcceso);
 public sealed class AccesoUsuario

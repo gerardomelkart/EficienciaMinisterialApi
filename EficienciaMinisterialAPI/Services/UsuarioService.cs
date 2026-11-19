@@ -26,10 +26,10 @@ public sealed class UsuarioService(UsuarioRepository repository, CatalogoReposit
 
     public async Task CambiarPasswordAsync(UsuarioInfo usuario, CambiarPasswordRequest request)
     {
-        if(request.PasswordNueva != request.Confirmacion || request.PasswordNueva.Length < 12
+        if(request.PasswordNueva != request.Confirmacion || request.PasswordNueva.Length < 8
             || System.Text.Encoding.UTF8.GetByteCount(request.PasswordNueva) > 72)
         {
-            throw new ArgumentException("Las contraseñas deben coincidir y tener al menos 12 caracteres y hasta 72 bytes UTF-8.");
+            throw new ArgumentException("Las contraseñas deben coincidir y tener al menos 8 caracteres y hasta 72 bytes UTF-8.");
         }
         var credenciales = await repository.ObtenerCredencialesAsync(usuario.Usuario);
         if(credenciales == null || System.Text.Encoding.UTF8.GetByteCount(request.PasswordActual) > 72
@@ -50,9 +50,9 @@ public sealed class UsuarioService(UsuarioRepository repository, CatalogoReposit
     public async Task<int> CrearAsync(CrearUsuarioRequest request, int? actor)
     {
         if(string.IsNullOrWhiteSpace(request.Usuario) || string.IsNullOrWhiteSpace(request.Nombre)
-            || request.Password.Length < 12 || System.Text.Encoding.UTF8.GetByteCount(request.Password) > 72)
+            || request.Password.Length < 8 || System.Text.Encoding.UTF8.GetByteCount(request.Password) > 72)
         {
-            throw new ArgumentException("Indique nombre, usuario y contraseña de al menos 12 caracteres y hasta 72 bytes UTF-8.");
+            throw new ArgumentException("Indique nombre, usuario y contraseña de al menos 8 caracteres y hasta 72 bytes UTF-8.");
         }
         var accesos = request.Accesos ?? [new AccesoUsuario
         {
