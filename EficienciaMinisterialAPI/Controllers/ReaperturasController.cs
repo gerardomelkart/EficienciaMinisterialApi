@@ -21,6 +21,52 @@ public sealed class ReaperturasController(SqlConnectionFactory factory) : Contro
             """));
     }
 
+    [HttpGet("catalogos")]
+    public async Task<IActionResult> Catalogos()
+    {
+        await using var db = await factory.AbrirAsync();
+        using var lector = await db.QueryMultipleAsync("""
+            SELECT YEAR(periodo_inicio) anio FROM primer_respondiente.carga WHERE estado='CONFIRMADA' AND vigente=1
+            UNION SELECT YEAR(inicio) FROM fiscalia.entrega WHERE vigente=1 ORDER BY anio DESC;
+            SELECT id,nombre FROM catalogo.entidad WHERE id BETWEEN 1 AND 32 ORDER BY nombre;
+            SELECT DISTINCT i.codigo,i.nombre FROM catalogo.institucion i JOIN primer_respondiente.carga c
+            ON c.institucion=i.codigo WHERE c.estado='CONFIRMADA' AND c.vigente=1 ORDER BY i.nombre;
+            """);
+        return Ok(new { anios = await lector.ReadAsync<int>(), entidades = await lector.ReadAsync(), corporaciones = await lector.ReadAsync() });
+    }
+
+    [HttpGet("consulta")]
+    public async Task<IActionResult> Consultar(int? anio, int? mes, int? quincena, int? entidad, string? corporacion,
+        string orden = "inicio", bool descendente = true, int pagina = 1, int tamano = 20)
+    {
+        if(anio is < 1 or > 9999 || mes is < 1 or > 12 || quincena is < 1 or > 2 || entidad is < 1 or > 32 ||
+            pagina is < 1 or > 1000000 || tamano is not (20 or 50 or 100)) return BadRequest();
+        var columna = orden switch {
+            "inicio" => "inicio", "modulo" => "modulo", "alcance" => "alcance", "folio" => "folio",
+            "reabierta" => "reabierta", _ => null
+        };
+        if(columna == null) return BadRequest();
+        await using var db = await factory.AbrirAsync();
+        using var resultado = await db.QueryMultipleAsync($"""
+            SELECT modulo,folio,alcance,inicio,fin,reabierta INTO #filtradas FROM (
+                SELECT N'Primer respondiente' modulo,c.folio,i.nombre alcance,c.periodo_inicio inicio,c.periodo_fin fin,c.reabierta
+                FROM primer_respondiente.carga c JOIN catalogo.institucion i ON i.codigo=c.institucion
+                WHERE c.estado='CONFIRMADA' AND c.vigente=1 AND (@corporacion IS NULL OR c.institucion=@corporacion)
+                AND (@entidad IS NULL OR EXISTS(SELECT 1 FROM primer_respondiente.registro r WHERE r.id_carga=c.id AND r.entidad=@entidad))
+                UNION ALL SELECT N'Fiscalía',CONCAT('EM-FIS-',YEAR(f.inicio),'-',f.id),COALESCE(e.nombre,'Nacional'),f.inicio,f.fin,f.reabierta
+                FROM fiscalia.entrega f LEFT JOIN catalogo.entidad e ON e.id=f.entidad
+                WHERE f.vigente=1 AND @corporacion IS NULL AND (@entidad IS NULL OR f.entidad=@entidad OR
+                    (f.entidad IS NULL AND EXISTS(SELECT 1 FROM fiscalia.respuesta s JOIN primer_respondiente.registro r ON r.id=s.registro
+                     WHERE s.entrega=f.id AND r.entidad=@entidad)))
+            ) entregas WHERE (@anio IS NULL OR YEAR(inicio)=@anio) AND (@mes IS NULL OR MONTH(inicio)=@mes)
+                AND (@quincena IS NULL OR CASE WHEN DAY(inicio)<=15 THEN 1 ELSE 2 END=@quincena) OPTION(RECOMPILE);
+            SELECT COUNT(*) FROM #filtradas;
+            SELECT * FROM #filtradas ORDER BY {columna} {(descendente ? "DESC" : "ASC")}, {(columna == "folio" ? "inicio" : "folio")} ASC
+            OFFSET @salto ROWS FETCH NEXT @tamano ROWS ONLY;
+            """, new { anio, mes, quincena, entidad, corporacion, salto=(pagina-1)*tamano, tamano });
+        return Ok(new { total=await resultado.ReadSingleAsync<int>(), filas=await resultado.ReadAsync() });
+    }
+
     [HttpPost("{folio}")]
     public async Task<IActionResult> Reabrir(string folio)
     {
