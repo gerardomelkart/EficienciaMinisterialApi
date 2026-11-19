@@ -14,6 +14,9 @@ public sealed class ValidacionFiscalia(int esperados)
     public int NoRecibidos { get; private set; }
     public List<IncidenciaFiscalia> Errores { get; } = [];
 
+    private static string TextoComparable(string valor) =>
+        new string(ExcelCargaService.Normalizar(valor).Where(c => !char.IsPunctuation(c) && !char.IsWhiteSpace(c)).ToArray());
+
     private static string Fecha(DateTime valor) => valor.ToString("yyyy-MM-dd HH:mm:ss");
     private static string Clave(params string[] valores) => JsonSerializer.Serialize(valores);
     private static string ClaveOrigen(FilaInformePr r) => Clave(Fecha(r.PeriodoInicio), Fecha(r.PeriodoFin),
@@ -30,7 +33,7 @@ public sealed class ValidacionFiscalia(int esperados)
             return resultado;
         }
         var pendientes = filas.CountBy(ClaveOrigen).ToDictionary();
-        var listas = opciones.ToLookup(x => x.Grupo, x => x.Descripcion.Trim());
+        var listas = opciones.ToLookup(x => x.Grupo, x => TextoComparable(x.Descripcion));
         foreach(var fila in hoja.RowsUsed(XLCellsUsedOptions.Contents).Where(r => r.RowNumber() >= 3))
         {
             string Valor(int col) => fila.Cell(col).HasFormula ? "[fórmula]" : fila.Cell(col).GetString().Trim();
@@ -48,8 +51,8 @@ public sealed class ValidacionFiscalia(int esperados)
             pendientes[clave]--;
             string Binaria(int col)
             {
-                var valor = Valor(col).ToUpperInvariant();
-                if(valor is "SI" or "SÍ") return "Sí";
+                var valor = TextoComparable(Valor(col));
+                if(valor == "SI") return "Sí";
                 if(valor == "NO") return "No";
                 Error(col, "Seleccione Sí o No.");
                 return "";
@@ -71,8 +74,9 @@ public sealed class ValidacionFiscalia(int esperados)
                 var valores = col == 20 ? valor.Split(';', StringSplitOptions.TrimEntries) : new[] { valor };
                 foreach(var opcion in valores)
                 {
-                    if(!listas[grupo].Contains(opcion, StringComparer.OrdinalIgnoreCase)) Error(col, "Use una opción del catálogo.");
-                    else if(col == 20 && opcion.StartsWith("XIV.", StringComparison.OrdinalIgnoreCase) && respuestas[19] == "No")
+                    var claveOpcion = TextoComparable(opcion);
+                    if(claveOpcion.Length == 0 || !listas[grupo].Contains(claveOpcion)) Error(col, "Use una opción del catálogo.");
+                    else if(col == 20 && claveOpcion == "XIVPRISIONPREVENTIVA" && respuestas[19] == "No")
                         Error(col, "Seleccionó prisión preventiva y respondió No en prisión preventiva.");
                 }
             }

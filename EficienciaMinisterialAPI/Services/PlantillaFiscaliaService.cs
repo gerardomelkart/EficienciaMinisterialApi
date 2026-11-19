@@ -111,7 +111,12 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
         hoja.Row(1).Height = 30; hoja.Row(2).Height = 45;
         foreach(var columna in new[] { 1, 2, 6 }) hoja.Column(columna).Style.DateFormat.Format = "dd/MM/yyyy";
         hoja.Range(2, 1, ultima, encabezados.Length).SetAutoFilter();
-        foreach(var columna in Binarias) hoja.Range(3, columna, ultima, columna).CreateDataValidation().List("\"Sí,No\"", true);
+        foreach(var columna in Binarias)
+        {
+            var validacion = hoja.Range(3, columna, ultima, columna).CreateDataValidation();
+            validacion.List("\"Sí,No\"", true);
+            validacion.ShowErrorMessage = false;
+        }
         var catalogos = libro.AddWorksheet("Catálogos");
         var col = 1;
         foreach(var (grupo, destino) in Grupos)
@@ -123,7 +128,7 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
             {
                 var validacion = hoja.Range(3, destino, ultima, destino).CreateDataValidation();
                 validacion.List(catalogos.Range(2, col, lista.Count + 1, col), true);
-                if(destino == 20) validacion.ShowErrorMessage = false;
+                validacion.ShowErrorMessage = false;
             }
             col++;
         }
