@@ -36,6 +36,7 @@ public sealed record RegistroCarga(int Fila, string Corporacion, string FolioRnd
 public sealed class UsuarioInfo
 {
     public bool Activo { get; set; } = true;
+    public bool Eliminado { get; set; }
     [System.Text.Json.Serialization.JsonIgnore]
     public bool CambioPasswordPendiente { get; set; }
     [System.Text.Json.Serialization.JsonIgnore]
@@ -95,3 +96,5 @@ public sealed record RegistroDescarga(string Corporacion, string FolioRnd, DateT
 public sealed record ResultadoConfirmacionCarga(CargaInfo? Carga, string? Mensaje = null, List<ErrorFila>? Errores = null);
 
 public sealed record ResultadoEliminarUsuario(bool Eliminado, string Mensaje, bool NoExiste = false);
+
+public sealed record ResultadoReactivarUsuario(bool Reactivado, string Mensaje, bool NoExiste = false);

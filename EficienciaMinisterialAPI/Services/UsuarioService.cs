@@ -9,7 +9,8 @@ public sealed class UsuarioService(UsuarioRepository repository, CatalogoReposit
 
     public Task<UsuarioInfo?> ObtenerAsync(int id) => repository.ObtenerAsync(id);
     public Task<ResultadoEliminarUsuario> EliminarAsync(int id, int actor) => repository.EliminarAsync(id, actor);
-    public Task<IEnumerable<UsuarioInfo>> ListarAsync() => repository.ListarAsync();
+    public Task<IEnumerable<UsuarioInfo>> ListarAsync(bool incluirInactivos = false) => repository.ListarAsync(incluirInactivos);
+    public Task<ResultadoReactivarUsuario> ReactivarAsync(int id, int actor) => repository.ReactivarAsync(id, actor);
 
     public async Task<UsuarioInfo?> AutenticarAsync(LoginRequest request)
     {

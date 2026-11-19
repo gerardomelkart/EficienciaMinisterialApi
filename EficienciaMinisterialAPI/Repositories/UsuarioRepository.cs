@@ -26,13 +26,13 @@ public sealed class UsuarioRepository(SqlConnectionFactory factory)
         return usuario;
     }
 
-    public async Task<IEnumerable<UsuarioInfo>> ListarAsync()
+    public async Task<IEnumerable<UsuarioInfo>> ListarAsync(bool incluirInactivos = false)
     {
         await using var db = await factory.AbrirAsync();
         using var datos = await db.QueryMultipleAsync("""
-            SELECT id, usuario, nombre, activo, debe_cambiar_password AS CambioPasswordPendiente, version_credenciales AS VersionCredenciales FROM seguridad.usuario WHERE eliminado = 0 ORDER BY nombre;
-            SELECT id, id_usuario AS IdUsuario, rol, institucion, ambito, entidad FROM seguridad.usuario_acceso WHERE id_usuario IN (SELECT id FROM seguridad.usuario WHERE eliminado = 0) ORDER BY id;
-            """);
+            SELECT id, usuario, nombre, activo, eliminado, debe_cambiar_password AS CambioPasswordPendiente, version_credenciales AS VersionCredenciales FROM seguridad.usuario WHERE @incluirInactivos = 1 OR (eliminado = 0 AND activo = 1) ORDER BY nombre;
+            SELECT id, id_usuario AS IdUsuario, rol, institucion, ambito, entidad FROM seguridad.usuario_acceso WHERE id_usuario IN (SELECT id FROM seguridad.usuario WHERE @incluirInactivos = 1 OR (eliminado = 0 AND activo = 1)) ORDER BY id;
+            """, new { incluirInactivos });
         var usuarios = (await datos.ReadAsync<UsuarioInfo>()).ToList();
         var accesos = (await datos.ReadAsync<AccesoConUsuario>()).ToLookup(a => a.IdUsuario);
         foreach(var usuario in usuarios)
@@ -179,6 +179,26 @@ public sealed class UsuarioRepository(SqlConnectionFactory factory)
             """, new { id, actor }, tx);
         await tx.CommitAsync();
         return new(true, "Cuenta eliminada.");
+    }
+
+    public async Task<ResultadoReactivarUsuario> ReactivarAsync(int id, int actor)
+    {
+        if(id == actor) return new(false, "Su cuenta ya está activa.");
+        await using var db = await factory.AbrirAsync();
+        await using var tx = (SqlTransaction)await db.BeginTransactionAsync();
+        await BloquearAdministracionAsync(db, tx);
+        var estado = await db.QuerySingleOrDefaultAsync<UsuarioInfo>(
+            "SELECT id, activo, eliminado FROM seguridad.usuario WHERE id = @id", new { id }, tx);
+        if(estado == null) return new(false, "La cuenta ya no está disponible.", true);
+        if(estado.Activo && !estado.Eliminado) return new(false, "La cuenta ya está activa.");
+        if(await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM seguridad.usuario_acceso WHERE id_usuario = @id", new { id }, tx) == 0)
+            return new(false, "La cuenta no tiene accesos asignados. Revise su configuración antes de reactivarla.");
+        await db.ExecuteAsync("""
+            UPDATE seguridad.usuario SET eliminado = 0, activo = 1, version_credenciales = version_credenciales + 1 WHERE id = @id;
+            INSERT seguridad.bitacora(id_usuario, accion, id_usuario_objetivo) VALUES(@actor, 'REACTIVAR_USUARIO', @id);
+            """, new { id, actor }, tx);
+        await tx.CommitAsync();
+        return new(true, "Cuenta reactivada. El usuario debe iniciar sesión nuevamente.");
     }
 
     private static async Task BloquearAdministracionAsync(SqlConnection db, SqlTransaction tx)

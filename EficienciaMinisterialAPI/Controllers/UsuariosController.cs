@@ -11,9 +11,9 @@ namespace EficienciaMinisterialAPI.Controllers;
 public sealed class UsuariosController(UsuarioService usuarios) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> Listar()
+    public async Task<IActionResult> Listar([FromQuery] bool incluirInactivos = false)
     {
-        return Ok(await usuarios.ListarAsync());
+        return Ok(await usuarios.ListarAsync(incluirInactivos));
     }
 
     [HttpPut("{id:int}")]
@@ -29,6 +29,15 @@ public sealed class UsuariosController(UsuarioService usuarios) : ControllerBase
         var resultado = await usuarios.EliminarAsync(id, int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!));
         if(resultado.NoExiste) return NotFound(new { mensaje = resultado.Mensaje });
         if(!resultado.Eliminado) return Conflict(new { mensaje = resultado.Mensaje });
+        return Ok(new { mensaje = resultado.Mensaje });
+    }
+
+    [HttpPut("{id:int}/reactivar")]
+    public async Task<IActionResult> Reactivar(int id)
+    {
+        var resultado = await usuarios.ReactivarAsync(id, int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!));
+        if(resultado.NoExiste) return NotFound(new { mensaje = resultado.Mensaje });
+        if(!resultado.Reactivado) return Conflict(new { mensaje = resultado.Mensaje });
         return Ok(new { mensaje = resultado.Mensaje });
     }
 

@@ -121,6 +121,13 @@ Probar("Eliminar rechaza la cuenta propia antes de acceder a SQL", () =>
     var resultado = repositorio.EliminarAsync(7, 7).GetAwaiter().GetResult();
     Ver(!resultado.Eliminado && !resultado.NoExiste && resultado.Mensaje.Contains("propia"), "Cuenta propia no protegida");
 });
+Probar("Reactivar la propia cuenta activa no consulta SQL ni recupera sesiones", () =>
+{
+    var configuracion = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+    var repositorio = new UsuarioRepository(new EficienciaMinisterialAPI.Data.SqlConnectionFactory(configuracion));
+    var resultado = repositorio.ReactivarAsync(7, 7).GetAwaiter().GetResult();
+    Ver(!resultado.Reactivado && !resultado.NoExiste && resultado.Mensaje.Contains("activa"), "Reactivación propia inválida");
+});
 UsuarioInfo usuario = new() { Institucion = "SEDENA", Ambito = "ESTATAL", Entidad = 9 };
 // Datos sintéticos exclusivos de estas pruebas. La aplicación obtiene los catálogos desde SQL.
 var catalogo = new CatalogoCaptura
