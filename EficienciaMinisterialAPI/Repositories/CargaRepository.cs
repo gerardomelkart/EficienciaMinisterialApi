@@ -109,13 +109,13 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
     public async Task<IEnumerable<CargaInfo>> ListarAsync(UsuarioInfo usuario)
     {
         await using var db = await factory.AbrirAsync();
-        return await db.QueryAsync<CargaInfo>($"SELECT TOP (200) {Columnas} FROM primer_respondiente.carga c WHERE c.estado = 'CONFIRMADA' AND c.vigente = 1 AND {Filtro(usuario)} ORDER BY creado_utc DESC", usuario);
+        return await db.QueryAsync<CargaInfo>($"SELECT TOP (200) {Columnas} FROM primer_respondiente.carga c WHERE c.estado = 'CONFIRMADA' AND c.vigente = 1 AND c.reabierta=0 AND {Filtro(usuario)} ORDER BY creado_utc DESC", usuario);
     }
 
     public async Task<CargaInfo?> ObtenerAsync(UsuarioInfo usuario, Guid id)
     {
         await using var db = await factory.AbrirAsync();
-        return await db.QuerySingleOrDefaultAsync<CargaInfo>($"SELECT {Columnas} FROM primer_respondiente.carga c WHERE c.id = @id AND c.estado = 'CONFIRMADA' AND {Filtro(usuario)}", new { id, usuario.Institucion, usuario.Ambito, usuario.Entidad });
+        return await db.QuerySingleOrDefaultAsync<CargaInfo>($"SELECT {Columnas} FROM primer_respondiente.carga c WHERE c.id = @id AND c.estado = 'CONFIRMADA' AND c.vigente=1 AND c.reabierta=0 AND {Filtro(usuario)}", new { id, usuario.Institucion, usuario.Ambito, usuario.Entidad });
     }
 
     public async Task<List<ErrorFila>> ValidarDuplicadosAsync(int idPeriodo, IReadOnlyList<RegistroCarga> registros)
@@ -307,7 +307,7 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
         await using var db = await factory.AbrirAsync();
         return await db.QuerySingleOrDefaultAsync<CargaInfo>($"""
             SELECT {Columnas} FROM primer_respondiente.carga c WHERE c.id = @id AND {Filtro(usuario)}
-            AND (c.estado = 'CONFIRMADA' OR (c.estado = 'VALIDADA' AND c.id_usuario = @UsuarioId AND @PuedeCargar = 1))
+            AND ((c.estado = 'CONFIRMADA' AND c.vigente=1 AND c.reabierta=0) OR (c.estado = 'VALIDADA' AND c.id_usuario = @UsuarioId AND @PuedeCargar = 1))
             """, new { id, UsuarioId = usuario.Id, usuario.Institucion, usuario.Ambito, usuario.Entidad, PuedeCargar = usuario.Rol is "SUPER_USUARIO" or "PRIMER_RESPONDIENTE" });
     }
 
@@ -322,7 +322,7 @@ public sealed class CargaRepository(SqlConnectionFactory factory, ILogger<CargaR
             JOIN primer_respondiente.carga c ON c.id = r.id_carga
             JOIN catalogo.entidad e ON e.id = r.entidad
             LEFT JOIN catalogo.fuero f ON f.codigo = r.tipo_fuero
-            WHERE c.id = @id AND c.estado = 'CONFIRMADA' AND c.vigente = 1 AND {Filtro(usuario)} ORDER BY r.fila
+            WHERE c.id = @id AND c.estado = 'CONFIRMADA' AND c.vigente = 1 AND c.reabierta=0 AND {Filtro(usuario)} ORDER BY r.fila
             """, new { id, usuario.Institucion, usuario.Ambito, usuario.Entidad });
     }
 }

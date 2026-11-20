@@ -19,7 +19,7 @@ public sealed class ReporteCompletoController(SqlConnectionFactory factory) : Co
     private const string Fuente = """
         FROM primer_respondiente.carga c JOIN primer_respondiente.registro r ON c.id=r.id_carga
         JOIN catalogo.entidad e ON e.id=r.entidad JOIN catalogo.institucion i ON i.codigo=c.institucion
-        WHERE c.estado='CONFIRMADA' AND c.vigente=1 AND (@nacional=1 OR r.entidad=@asignada)
+        WHERE c.estado='CONFIRMADA' AND c.vigente=1 AND c.reabierta=0 AND (@nacional=1 OR r.entidad=@asignada)
         AND (@institucion IS NULL OR c.institucion=@institucion)
         """;
     [HttpGet("catalogos")]
@@ -45,7 +45,7 @@ public sealed class ReporteCompletoController(SqlConnectionFactory factory) : Co
             FROM base b OUTER APPLY (
                 SELECT CONCAT('EM-FIS-',YEAR(t.inicio),'-',t.id) folio,s.datos
                 FROM fiscalia.respuesta s JOIN fiscalia.entrega t ON s.entrega=t.id
-                WHERE s.registro=b.id AND t.vigente=1 AND (@nacional=1 OR t.entidad=@asignada)
+                WHERE s.registro=b.id AND t.vigente=1 AND t.reabierta=0 AND (@nacional=1 OR t.entidad=@asignada)
             ) f ORDER BY b.Entidad,b.Corporacion,b.Entrega,b.fila,f.folio
             """,Alcance(inicio,entidad,corporacion),commandTimeout:180);
         string[] columnas=["Corporación","Entidad de detención","Entrega de primer respondiente","Folio RND","Nombre informado","Fecha de detención","Cruce RND","Entrega de Fiscalía",..PlantillaFiscaliaService.Respuesta];

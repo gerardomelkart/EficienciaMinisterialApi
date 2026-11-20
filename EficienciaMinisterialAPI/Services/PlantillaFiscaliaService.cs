@@ -5,7 +5,7 @@ using EficienciaMinisterialAPI.Models;
 
 namespace EficienciaMinisterialAPI.Services;
 
-public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
+public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory, CruceRndService rnd)
 {
     public static bool TieneAcceso(UsuarioInfo usuario) => usuario.Rol == "SUPER_USUARIO"
         || (usuario.Rol == "FISCALIA" && (usuario.Ambito == "NACIONAL"
@@ -19,7 +19,7 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
 
     private const string Elegibles = """
         c.estado = 'CONFIRMADA' AND c.vigente = 1
-        AND r.estado_cruce = 'LOCALIZADO'
+        AND c.reabierta = 0 AND r.estado_cruce IN ('LOCALIZADO','PENDIENTE')
         AND (@Nacional = 1 OR r.entidad = @Entidad)
         """;
 
@@ -32,7 +32,7 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
             FROM primer_respondiente.carga c JOIN primer_respondiente.registro r ON r.id_carga = c.id
             WHERE {Elegibles} ORDER BY Inicio DESC;
             """, Alcance(usuario))).ToList();
-        var entregas = (await db.QueryAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WHERE (@Nacional=1 AND entidad IS NULL) OR (@Nacional=0 AND entidad=@Entidad) ORDER BY inicio DESC", Alcance(usuario))).ToList();
+        var entregas = (await db.QueryAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WHERE vigente=1 AND reabierta=0 AND ((@Nacional=1 AND entidad IS NULL) OR (@Nacional=0 AND entidad=@Entidad)) ORDER BY inicio DESC", Alcance(usuario))).ToList();
         var bloqueadas = await db.QueryAsync<PeriodoInfo>("SELECT inicio, fin FROM fiscalia.entrega WHERE vigente=1 AND reabierta=0 AND ((@Nacional=1 AND entidad IS NULL) OR (@Nacional=0 AND entidad=@Entidad))", Alcance(usuario));
         var confirmados = bloqueadas.Select(p => (p.Inicio, p.Fin)).ToHashSet();
         periodos.RemoveAll(p => confirmados.Contains((p.Inicio, p.Fin)));
@@ -53,14 +53,17 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
     {
         if(!TieneAcceso(usuario)) throw new UnauthorizedAccessException();
         await using var db = await factory.AbrirAsync();
-        return await LeerAsync(usuario, inicio, fin, db, null);
+        await using var tx = await db.BeginTransactionAsync();
+        var datos = await LeerAsync(usuario, inicio, fin, db, tx);
+        await tx.CommitAsync();
+        return datos;
     }
 
-    private static async Task<(List<FilaInformePr> Filas, List<Opcion> Opciones)> LeerAsync(UsuarioInfo usuario, DateTime inicio, DateTime fin,
-        Microsoft.Data.SqlClient.SqlConnection db, System.Data.Common.DbTransaction? tx)
+    private async Task<(List<FilaInformePr> Filas, List<Opcion> Opciones)> LeerAsync(UsuarioInfo usuario, DateTime inicio, DateTime fin,
+        Microsoft.Data.SqlClient.SqlConnection db, System.Data.Common.DbTransaction? tx, bool soloLocalizadas = false)
     {
         var filas = (await db.QueryAsync<FilaInformePr>($"""
-            SELECT r.id AS IdRegistro, c.periodo_inicio AS PeriodoInicio, c.periodo_fin AS PeriodoFin,
+            SELECT r.estado_cruce AS EstadoCruce, r.id AS IdRegistro, c.periodo_inicio AS PeriodoInicio, c.periodo_fin AS PeriodoFin,
                 c.folio AS FolioEntrega, i.nombre AS Corporacion, r.folio_rnd AS FolioRnd,
                 r.fecha_detencion AS FechaDetencion, r.nombre_detenido AS NombreDetenido,
                 e.nombre AS Entidad, r.autoridad_puesta AS AutoridadPuesta,
@@ -68,9 +71,36 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
             FROM primer_respondiente.carga c JOIN primer_respondiente.registro r ON r.id_carga = c.id
             JOIN catalogo.institucion i ON i.codigo = c.institucion
             JOIN catalogo.entidad e ON e.id = r.entidad
-            WHERE {Elegibles} AND c.periodo_inicio = @inicio AND c.periodo_fin = @fin
+            WHERE {Elegibles} {(soloLocalizadas ? "AND r.estado_cruce='LOCALIZADO'" : "")} AND c.periodo_inicio = @inicio AND c.periodo_fin = @fin
             ORDER BY c.institucion, r.entidad, c.folio, r.fila;
             """, Alcance(usuario, inicio, fin), transaction: tx, commandTimeout: 180)).ToList();
+        var pendientes = filas.Where(f => f.EstadoCruce == "PENDIENTE").ToList();
+        if (pendientes.Count > 0)
+        {
+            // La consulta RND usa el número de fila, el folio, el nombre y la fecha.
+            var solicitudes = pendientes.Select((f, i) => new RegistroCarga(i + 1, f.Corporacion,
+                f.FolioRnd, f.FechaDetencion, f.AutoridadPuesta, f.NombreDetenido, 0, f.Fuero)).ToList();
+            var resultado = await rnd.CruzarAsync(solicitudes);
+            var actualizaciones = pendientes.Select((f, i) =>
+            {
+                var normales = resultado.Filas.GetValueOrDefault(i + 1);
+                var administrativas = resultado.Administrativas.GetValueOrDefault(i + 1);
+                var estado = normales?.Count > 0 ? "LOCALIZADO" :
+                    administrativas?.Count > 0 ? "FALTA_ADMINISTRATIVA" : "NO_LOCALIZADO";
+                return new { f.IdRegistro, Estado = estado,
+                    Tabla = administrativas?.Count > 0 ? resultado.TablaFa : resultado.Tabla,
+                    Fecha = administrativas?.Count > 0 ? DateTime.ParseExact(resultado.TablaFa!.Substring(12, 8), "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture) : resultado.FechaFuente,
+                    Coincidencias = System.Text.Json.JsonSerializer.Serialize(normales ?? administrativas ?? []) };
+            }).ToList();
+            await db.ExecuteAsync("""
+                UPDATE r SET estado_cruce=@Estado, rnd_tabla=@Tabla, rnd_fecha_fuente=@Fecha,
+                    rnd_consultado_utc=SYSUTCDATETIME(), rnd_coincidencias=@Coincidencias
+                FROM primer_respondiente.registro r JOIN primer_respondiente.carga c ON c.id=r.id_carga
+                WHERE r.id=@IdRegistro AND r.estado_cruce='PENDIENTE' AND c.vigente=1 AND c.reabierta=0
+                """, actualizaciones, tx);
+            // Volver a leer el estado persistido, incluso ante descargas simultáneas.
+            return await LeerAsync(usuario, inicio, fin, db, tx, soloLocalizadas: true);
+        }
         if(filas.Count > XLHelper.MaxRowNumber - 2) throw new ArgumentException("Seleccione un periodo con menos registros para generar Excel.");
         var opciones = (await db.QueryAsync<Opcion>("""
             SELECT grupo AS Grupo, descripcion AS Descripcion FROM catalogo.opcion_ministerial
@@ -97,7 +127,7 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory)
     public async Task<Entrega?> AcuseAsync(UsuarioInfo usuario, long id)
     {
         await using var db = await factory.AbrirAsync();
-        return await db.QuerySingleOrDefaultAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WHERE id=@id AND (@nacional=1 OR entidad=@entidad)",
+        return await db.QuerySingleOrDefaultAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WHERE id=@id AND vigente=1 AND reabierta=0 AND (@nacional=1 OR entidad=@entidad)",
             new { id, nacional = usuario.Rol == "SUPER_USUARIO" || usuario.Ambito == "NACIONAL", usuario.Entidad });
     }
 

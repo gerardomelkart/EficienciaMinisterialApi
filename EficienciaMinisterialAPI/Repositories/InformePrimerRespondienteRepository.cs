@@ -8,7 +8,7 @@ public sealed class InformePrimerRespondienteRepository(SqlConnectionFactory fac
 {
     // Todos los filtros se intersectan con el acceso activo recuperado desde BD, incluso en Excel.
     private const string Alcance = """
-        c.estado = 'CONFIRMADA' AND c.vigente = 1
+        c.estado = 'CONFIRMADA' AND c.vigente = 1 AND c.reabierta = 0
         AND (@EsSuper = 1 OR (
             (@InstitucionAcceso IS NULL OR c.institucion = @InstitucionAcceso)
             AND (@Rol <> 'PRIMER_RESPONDIENTE' OR @InstitucionAcceso IS NOT NULL)
