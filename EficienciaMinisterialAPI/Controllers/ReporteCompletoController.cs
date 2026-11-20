@@ -54,15 +54,32 @@ public sealed class ReporteCompletoController(SqlConnectionFactory factory) : Co
                 .Concat(PlantillaFiscaliaService.Respuesta.Select(c=>respuestas?.GetValueOrDefault(c) ?? "")).ToArray();
         }).ToList();
         if(!excel) return Ok(new {columnas,filas});
-        if(filas.Count >= XLHelper.MaxRowNumber) return BadRequest(new {mensaje="Seleccione una entidad para reducir el número de registros."});
+        if(filas.Count > XLHelper.MaxRowNumber - 2) return BadRequest(new {mensaje="Seleccione una entidad para reducir el número de registros."});
         using var libro=new XLWorkbook();
         var hoja=libro.AddWorksheet("Seguimiento ministerial");
-        hoja.Cell(1,1).InsertData(new[]{columnas});
-        hoja.Cell(2,1).InsertData(filas);
-        hoja.Row(1).Style.Font.Bold=true;
-        hoja.SheetView.FreezeRows(1);
-        hoja.RangeUsed()!.SetAutoFilter();
-        hoja.Columns().Width=26;
+        hoja.Cell(2,1).InsertData(new[]{columnas});
+        if (filas.Count > 0) hoja.Cell(3,1).InsertData(filas);
+        void Encabezado(int desde, int hasta, string titulo, string color)
+        {
+            var banda = hoja.Range(1, desde, 1, hasta);
+            if (desde < hasta) banda.Merge();
+            banda.FirstCell().Value = titulo;
+            var estilo = hoja.Range(1, desde, 2, hasta).Style;
+            estilo.Fill.BackgroundColor = XLColor.FromHtml(color);
+            estilo.Font.FontColor = XLColor.White;
+            estilo.Font.Bold = true;
+            estilo.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        }
+        Encabezado(1, 6, "Información reportada por primer respondiente", "#621132");
+        Encabezado(7, 7, "Registro Nacional de Detenciones", "#B38E5D");
+        Encabezado(8, columnas.Length, "Seguimiento de Fiscalía", "#285C4D");
+        hoja.Row(1).Height = 26;
+        hoja.Row(2).Height = 32;
+        hoja.Row(2).Style.Alignment.WrapText = true;
+        hoja.SheetView.FreezeRows(2);
+        hoja.Range(2, 1, filas.Count + 2, columnas.Length).SetAutoFilter();
+        hoja.Columns(1, columnas.Length).Width = 26;
+        hoja.Column(7).Width = 36;
         using var salida=new MemoryStream();
         libro.SaveAs(salida);
         return File(salida.ToArray(),"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
