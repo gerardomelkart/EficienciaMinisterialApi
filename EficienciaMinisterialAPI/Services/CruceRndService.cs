@@ -75,6 +75,15 @@ public sealed class CruceRndService(IConfiguration configuration, ILogger<CruceR
             }
             campos.Add($"[{origen}] AS [{requerida}]");
         }
+        void CampoOpcional(string alias, params string[] nombres)
+        {
+            var origen = nombres.FirstOrDefault(columnas.Contains);
+            campos.Add(origen == null ? $"CAST(NULL AS nvarchar(1)) AS [{alias}]" : $"CONVERT(nvarchar(max), [{origen}]) AS [{alias}]");
+        }
+        CampoOpcional("Municipio", "MUNICIPIO_DETENCION", "MUNICIPIO");
+        CampoOpcional("Autoridad", "AUTORIDAD_PUESTA_DISPOSICION", "AUTORIDAD_PUESTA", "AUTORIDAD_DISPOSICION");
+        CampoOpcional("Motivo", "MOTIVO_DETENCION");
+        CampoOpcional("Tipo", "TIPO_DETENCION");
         var fuenteSql = $"SELECT {string.Join(", ", campos)} FROM [dbo].[{tabla}]";
         var filtroAdministrativas = fa ? "1 = 1" : "r.FOLIO_DETENIDO NOT LIKE '%/IA/%' AND r.FOLIO_DETENIDO NOT LIKE '%/AI/%'";
         // #solicitud vive sólo en tempdb para esta conexión; no escribe tablas de RND.
@@ -119,7 +128,7 @@ public sealed class CruceRndService(IConfiguration configuration, ILogger<CruceR
                 TRY_CONVERT(datetime2, r.FECHA_DETENCION) AS FechaDetencion,
                 COALESCE(r.ENTIDAD_DETENCION, '') AS Entidad,
                 COALESCE(r.NOMBRE_FISCALIA, '') AS Fiscalia, COALESCE(r.NOMBRE_FUERO, '') AS Fuero,
-                CAST(@porFolio AS bit) AS PorFolio
+                r.Municipio, r.Autoridad, r.Motivo, r.Tipo, CAST(@porFolio AS bit) AS PorFolio
             """;
         var preparacionMs = reloj.ElapsedMilliseconds;
         logger.LogInformation("Cruce {Tabla}: preparación {Ms} ms; iniciando búsqueda por folio", tabla, preparacionMs);
@@ -164,7 +173,7 @@ public sealed class CruceRndService(IConfiguration configuration, ILogger<CruceR
         await db.ExecuteAsync("DROP TABLE #solicitud;", transaction: tx);
         var filas = candidatos.GroupBy(c => c.Fila).ToDictionary(g => g.Key,
             g => g.Select(c => new CoincidenciaRnd(c.Folio, c.IdDetenido, c.IdDetencion, c.IdPuesta,
-                c.NombrePr, c.NombreMp, c.FechaDetencion, c.Entidad, c.Fiscalia, c.Fuero, c.PorFolio ? "Folio" : "Nombre PR + fecha")).Distinct().ToList());
+                c.NombrePr, c.NombreMp, c.FechaDetencion, c.Entidad, c.Fiscalia, c.Fuero, c.PorFolio ? "Folio" : "Nombre PR + fecha", c.Municipio, c.Autoridad, c.Motivo, c.Tipo)).Distinct().ToList());
         await tx.CommitAsync();
         logger.LogInformation("Cruce RND con {Tabla}: filas {Filas}; por folio {PorFolio}; por nombre PR y fecha {PorNombre}; sin coincidencia {SinCoincidencia}",
             tabla, registros.Count, filas.Count(f => f.Value.Any(c => c.Metodo == "Folio")),
@@ -200,6 +209,10 @@ public sealed class CruceRndService(IConfiguration configuration, ILogger<CruceR
     private sealed class FilaRnd
     {
         public int Fila { get; set; }
+        public string? Municipio { get; set; }
+        public string? Autoridad { get; set; }
+        public string? Motivo { get; set; }
+        public string? Tipo { get; set; }
         public bool PorFolio { get; set; }
         public string Folio { get; set; } = "";
         public string IdDetenido { get; set; } = "";
