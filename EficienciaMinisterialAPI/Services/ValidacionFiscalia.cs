@@ -61,11 +61,19 @@ public sealed class ValidacionFiscalia(int esperados)
             var recibido = Binaria(11);
             var datos = new Dictionary<string,string> { [columnas[10]] = recibido, [columnas[24]] = Valor(25) };
             resultado.Respuestas[registro] = datos;
-            if(recibido == "No") resultado.NoRecibidos++;
+            if(recibido == "No")
+            {
+                resultado.NoRecibidos++;
+                for (int col = 12; col <= 24; col++)
+                    if (Valor(col).Length > 0)
+                        Error(col, "Deje el seguimiento vacío cuando Recibido por Fiscalía es No. Puede agregar comentarios.");
+            }
             if(recibido != "Sí") continue;
             resultado.Recibidos++;
             var respuestas = Binarias.Skip(1).ToDictionary(c => c, Binaria);
             foreach(var (columna, respuesta) in respuestas) datos[columnas[columna - 1]] = respuesta;
+            if (respuestas[17] == "No" && respuestas[23] == "Sí")
+                Error(23, "Revise la vinculación a proceso y el inicio de juicio oral para esta detención: indicó No en vinculación y Sí en juicio oral.");
             foreach(var (grupo, col) in Grupos)
             {
                 var valor = Valor(col);
@@ -75,6 +83,14 @@ public sealed class ValidacionFiscalia(int esperados)
                         Error(col, "Seleccione el motivo correspondiente.");
                     continue;
                 }
+                if (col == 13 && respuestas[12] == "No")
+                    Error(col, "Indicó No en libertad ministerial. Revise esa respuesta o deje vacío el motivo de libertad.");
+                if (col == 16 && respuestas[15] == "Sí")
+                    Error(col, "Indicó que la detención fue legal. Revise esa respuesta o deje vacío el motivo de detención ilegal.");
+                if (col == 18 && respuestas[17] == "Sí")
+                    Error(col, "Indicó que hubo vinculación a proceso. Revise esa respuesta o deje vacío el motivo de no vinculación.");
+                if (col == 18 && respuestas[12] == "No" && TextoComparable(valor) == "LIBERTADENSEDEMINISTERIAL")
+                    Error(col, "El motivo de no vinculación indica libertad en sede ministerial, pero respondió No en libertad ministerial.");
                 var valores = col == 20 ? valor.Split(';', StringSplitOptions.TrimEntries) : new[] { valor };
                 var canonicas = new List<string>();
                 foreach(var opcion in valores)
