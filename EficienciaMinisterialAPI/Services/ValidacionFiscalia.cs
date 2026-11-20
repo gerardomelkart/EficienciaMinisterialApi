@@ -10,6 +10,7 @@ public sealed record IncidenciaFiscalia(int? Fila, string Campo, string Detalle)
 public sealed class ValidacionFiscalia(int esperados)
 {
     internal SortedDictionary<long, Dictionary<string,string>> Respuestas { get; } = new();
+    public int Omitidos { get; private set; }
     public int Esperados { get; } = esperados;
     public int Recibidos { get; private set; }
     public int NoRecibidos { get; private set; }
@@ -25,7 +26,7 @@ public sealed class ValidacionFiscalia(int esperados)
 
     public static ValidacionFiscalia Revisar(XLWorkbook libro, List<FilaInformePr> filas, List<Opcion> opciones)
     {
-        var resultado = new ValidacionFiscalia(filas.Count);
+        var resultado = new ValidacionFiscalia(filas.Count(f => !f.Atendido));
         var columnas = Origen.Concat(Respuesta).ToArray();
         if(!libro.TryGetWorksheet("Seguimiento", out var hoja)
             || columnas.Where((titulo, i) => hoja.Cell(2, i + 1).GetString() != titulo).Any())
@@ -33,7 +34,8 @@ public sealed class ValidacionFiscalia(int esperados)
             resultado.Errores.Add(new(null, "Plantilla", "Descargue la plantilla vigente y conserve sus encabezados."));
             return resultado;
         }
-        var pendientes = filas.GroupBy(ClaveOrigen).ToDictionary(g => g.Key, g => new Queue<long>(g.Select(f => f.IdRegistro)));
+        var atendidas = filas.Where(f => f.Atendido).GroupBy(ClaveOrigen).ToDictionary(g => g.Key, g => g.Count());
+        var pendientes = filas.Where(f => !f.Atendido).GroupBy(ClaveOrigen).ToDictionary(g => g.Key, g => new Queue<long>(g.Select(f => f.IdRegistro)));
         var listas = opciones.ToLookup(x => x.Grupo);
         foreach(var fila in hoja.RowsUsed(XLCellsUsedOptions.Contents).Where(r => r.RowNumber() >= 3))
         {
@@ -46,6 +48,12 @@ public sealed class ValidacionFiscalia(int esperados)
             }).ToArray());
             if(!pendientes.TryGetValue(clave, out var ids) || !ids.TryDequeue(out var registro))
             {
+                if (atendidas.GetValueOrDefault(clave) > 0)
+                {
+                    atendidas[clave]--;
+                    resultado.Omitidos++;
+                    continue;
+                }
                 resultado.Errores.Add(new(fila.RowNumber(), "Precarga", "Fila repetida, modificada o ajena a la precarga vigente."));
                 continue;
             }
@@ -105,9 +113,11 @@ public sealed class ValidacionFiscalia(int esperados)
                 datos[columnas[col - 1]] = string.Join("; ", canonicas);
             }
         }
+        if (resultado.Esperados == 0)
+            resultado.Errores.Add(new(null, "Entrega", "No quedan registros pendientes para confirmar en esta quincena."));
         var faltantes = pendientes.Values.Sum(q => q.Count);
         if(faltantes > 0) resultado.Errores.Add(new(null, "Precarga", $"Faltan {faltantes} filas originales de la precarga vigente."));
-        if(resultado.Recibidos + resultado.NoRecibidos != filas.Count)
+        if(resultado.Recibidos + resultado.NoRecibidos != resultado.Esperados)
             resultado.Errores.Add(new(null, "Recibido por fiscalía", "La suma de Sí y No debe coincidir con el total precargado."));
         return resultado;
     }

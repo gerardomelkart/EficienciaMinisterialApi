@@ -23,6 +23,11 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory, Cruce
         AND (@Nacional = 1 OR r.entidad = @Entidad)
         """;
 
+    private const string Atendido = """
+        EXISTS (SELECT 1 FROM fiscalia.respuesta s JOIN fiscalia.entrega t ON t.id=s.entrega
+                WHERE s.registro=r.id AND t.vigente=1 AND t.reabierta=0)
+        """;
+
     public async Task<object> CatalogosAsync(UsuarioInfo usuario)
     {
         if(!TieneAcceso(usuario)) throw new UnauthorizedAccessException();
@@ -30,7 +35,7 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory, Cruce
         var periodos = (await db.QueryAsync<PeriodoInfo>($"""
             SELECT DISTINCT c.periodo_inicio AS Inicio, c.periodo_fin AS Fin
             FROM primer_respondiente.carga c JOIN primer_respondiente.registro r ON r.id_carga = c.id
-            WHERE {Elegibles} ORDER BY Inicio DESC;
+            WHERE {Elegibles} AND NOT {Atendido} ORDER BY Inicio DESC;
             """, Alcance(usuario))).ToList();
         var entregas = (await db.QueryAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WHERE vigente=1 AND reabierta=0 AND ((@Nacional=1 AND entidad IS NULL) OR (@Nacional=0 AND entidad=@Entidad)) ORDER BY inicio DESC", Alcance(usuario))).ToList();
         var bloqueadas = await db.QueryAsync<PeriodoInfo>("SELECT inicio, fin FROM fiscalia.entrega WHERE vigente=1 AND reabierta=0 AND ((@Nacional=1 AND entidad IS NULL) OR (@Nacional=0 AND entidad=@Entidad))", Alcance(usuario));
@@ -42,6 +47,7 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory, Cruce
     public async Task<(byte[]? Archivo, int Total)> DescargarAsync(UsuarioInfo usuario, DateTime inicio, DateTime fin)
     {
         var (filas, opciones) = await ObtenerDatosAsync(usuario, inicio, fin);
+        filas.RemoveAll(f => f.Atendido);
         if(filas.Count == 0) return (null, 0);
         var archivo = Crear(filas, opciones);
         await using var db = await factory.AbrirAsync();
@@ -63,7 +69,7 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory, Cruce
         Microsoft.Data.SqlClient.SqlConnection db, System.Data.Common.DbTransaction? tx, bool soloLocalizadas = false)
     {
         var filas = (await db.QueryAsync<FilaInformePr>($"""
-            SELECT r.estado_cruce AS EstadoCruce, r.id AS IdRegistro, c.periodo_inicio AS PeriodoInicio, c.periodo_fin AS PeriodoFin,
+            SELECT CAST(CASE WHEN {Atendido} THEN 1 ELSE 0 END AS bit) AS Atendido, r.estado_cruce AS EstadoCruce, r.id AS IdRegistro, c.periodo_inicio AS PeriodoInicio, c.periodo_fin AS PeriodoFin,
                 c.folio AS FolioEntrega, i.nombre AS Corporacion, r.folio_rnd AS FolioRnd,
                 r.fecha_detencion AS FechaDetencion, r.nombre_detenido AS NombreDetenido,
                 e.nombre AS Entidad, r.autoridad_puesta AS AutoridadPuesta,
@@ -112,6 +118,7 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory, Cruce
 
     public sealed record Entrega(long Id, DateTime Inicio, DateTime Fin, DateTime Fecha, int Recibidos, int NoRecibidos, byte? Entidad)
     {
+        public int Omitidos { get; init; }
         public string Folio => $"EM-FIS-{Inicio:yyyy}-{Id}";
     }
 
@@ -137,6 +144,18 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory, Cruce
         await using var tx = await db.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         byte? entidad = usuario.Rol == "SUPER_USUARIO" || usuario.Ambito == "NACIONAL" ? null : usuario.Entidad;
         var parametros = new { inicio = inicio.Date, fin = fin.Date, entidad };
+        var bloqueo = await db.ExecuteScalarAsync<int>("""
+            DECLARE @resultado int;
+            EXEC @resultado=sys.sp_getapplock @Resource=@recurso, @LockMode='Exclusive',
+                @LockOwner='Transaction', @LockTimeout=30000;
+            SELECT @resultado;
+            """, new { recurso = $"EM-FISCALIA-{inicio:yyyyMMdd}-{fin:yyyyMMdd}" }, tx, commandTimeout: 40);
+        if (bloqueo < 0)
+        {
+            var espera = new ValidacionFiscalia(0);
+            espera.Errores.Add(new(null, "Entrega", "Hay otra confirmación en curso. Intente nuevamente."));
+            return (null, espera);
+        }
         var previa = await db.QuerySingleOrDefaultAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WITH (UPDLOCK,HOLDLOCK) WHERE vigente=1 AND inicio=@inicio AND fin=@fin AND (entidad=@entidad OR (entidad IS NULL AND @entidad IS NULL))", parametros, tx);
         if(previa != null && !await db.ExecuteScalarAsync<bool>("SELECT reabierta FROM fiscalia.entrega WHERE id=@Id", previa, tx)) return (null, null);
         var (filas, opciones) = await LeerAsync(usuario, inicio, fin, db, tx);
@@ -168,7 +187,7 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory, Cruce
         await copia.WriteToServerAsync(tabla);
         await db.ExecuteAsync("INSERT seguridad.bitacora(id_usuario,accion) VALUES(@Id,'CONFIRMAR_ENTREGA_FISCALIA')", new { usuario.Id }, tx);
         await tx.CommitAsync();
-        return (entrega, null);
+        return (entrega with { Omitidos = revision.Omitidos }, null);
     }
 
     public sealed class Opcion

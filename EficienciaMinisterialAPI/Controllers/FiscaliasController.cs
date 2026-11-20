@@ -112,7 +112,7 @@ public sealed class FiscaliasController(PlantillaFiscaliaService plantillas) : C
                 var entidad = Usuario.Ambito == "ESTATAL" && Usuario.Rol != "SUPER_USUARIO" ? Usuario.Entidad : null;
                 previo = AcuseCargaService.CrearFiscalia(new(0, inicio, fin, DateTime.UtcNow, resultado.Recibidos, resultado.NoRecibidos, entidad), previo: true);
             }
-            return Ok(new { resultado.Esperados, resultado.Recibidos, resultado.NoRecibidos, resultado.Errores, previo });
+            return Ok(new { resultado.Omitidos, resultado.Esperados, resultado.Recibidos, resultado.NoRecibidos, resultado.Errores, previo });
         }
     }
 }

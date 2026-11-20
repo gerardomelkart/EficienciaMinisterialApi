@@ -43,9 +43,10 @@ public sealed class ReporteCompletoController(SqlConnectionFactory factory) : Co
             """+" "+Fuente+" AND c.periodo_inicio=@inicio AND (@entidad IS NULL OR r.entidad=@entidad) AND (@corporacion IS NULL OR c.institucion=@corporacion)) "+"""
             SELECT b.*, f.folio FolioFiscalia,f.datos Datos
             FROM base b OUTER APPLY (
-                SELECT CONCAT('EM-FIS-',YEAR(t.inicio),'-',t.id) folio,s.datos
+                SELECT TOP (1) CONCAT('EM-FIS-',YEAR(t.inicio),'-',t.id) folio,s.datos
                 FROM fiscalia.respuesta s JOIN fiscalia.entrega t ON s.entrega=t.id
-                WHERE s.registro=b.id AND t.vigente=1 AND t.reabierta=0 AND (@nacional=1 OR t.entidad=@asignada)
+                WHERE s.registro=b.id AND t.vigente=1 AND t.reabierta=0 AND (@nacional=1 OR t.entidad=@asignada OR t.entidad IS NULL)
+                ORDER BY CASE WHEN t.entidad IS NULL THEN 1 ELSE 0 END, t.id DESC
             ) f ORDER BY b.Entidad,b.Corporacion,b.Entrega,b.fila,f.folio
             """,Alcance(inicio,entidad,corporacion),commandTimeout:180);
         string[] columnas=["ENTIDAD", "num", "id_key", "corporacion_reporta", "nombre_detenido_corporacion", "fecha_detencion_corporacion", "folio_RND", "num_detenido", "num_detencion", "nombre_detenido", "fecha_detencion", "municipio_detencion", "tipo_fuero", "id_puesta", "autoridad_puesta", "motivo_detencion", "tipo detención", "recibido_por_fiscalia", "libertad_sede_ministerial", "razon_libertad", "audiencia_inicial", "legal_detencion", "motivo_no_legal", "vinculacion_proceso", "motivo_no_vinculacion", "prision_preventiva", "medida_cautelar", "MASC", "procedimiento_abreviado", "inicia_juicio", "descripcion_conclusion", "comentarios", "Entrega de primer respondiente", "Folio RND informado", "Cruce RND", "Entrega de Fiscalía"];
