@@ -24,9 +24,14 @@ public sealed class ValidacionFiscalia(int esperados)
     private static string ClaveOrigen(FilaInformePr r) => Clave(Fecha(r.PeriodoInicio), Fecha(r.PeriodoFin),
         r.FolioEntrega, r.Corporacion, r.FolioRnd, Fecha(r.FechaDetencion), r.NombreDetenido, r.Entidad, r.AutoridadPuesta, r.Fuero);
 
-    public static ValidacionFiscalia Revisar(XLWorkbook libro, List<FilaInformePr> filas, List<Opcion> opciones)
+    public static ValidacionFiscalia Revisar(XLWorkbook libro, List<FilaInformePr> filas, List<Opcion> opciones, long revision = 0)
     {
         var resultado = new ValidacionFiscalia(filas.Count(f => !f.Atendido));
+        if(revision > 0 && libro.Properties.Keywords != $"EM-FISCALIA-{revision}")
+        {
+            resultado.Errores.Add(new(null, "Plantilla", "La plantilla es anterior a la corrección. Descargue la plantilla vigente y complete toda la entrega."));
+            return resultado;
+        }
         var columnas = Origen.Concat(Respuesta).ToArray();
         if(!libro.TryGetWorksheet("Seguimiento", out var hoja)
             || columnas.Where((titulo, i) => hoja.Cell(2, i + 1).GetString() != titulo).Any())

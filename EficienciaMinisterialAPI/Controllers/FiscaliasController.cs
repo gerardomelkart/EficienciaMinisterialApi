@@ -103,9 +103,9 @@ public sealed class FiscaliasController(PlantillaFiscaliaService plantillas) : C
                 return Conflict(new { mensaje = revision == null ? "Ya existe una entrega confirmada para este periodo y alcance." :
                     revision.Errores.FirstOrDefault()?.Detalle ?? "La precarga cambió. Revise el archivo antes de confirmar.", revision });
             }
-            var (filas, opciones) = await plantillas.ObtenerDatosAsync(Usuario, inicio, fin);
+            var (filas, opciones, revisionOrigen) = await plantillas.ObtenerDatosAsync(Usuario, inicio, fin);
             if(filas.Count == 0) return BadRequest(new { mensaje = "No hay una precarga vigente para este periodo." });
-            var resultado = ValidacionFiscalia.Revisar(libro, filas, opciones);
+            var resultado = ValidacionFiscalia.Revisar(libro, filas, opciones, revisionOrigen);
             byte[]? previo = null;
             if(resultado.Errores.Count == 0)
             {

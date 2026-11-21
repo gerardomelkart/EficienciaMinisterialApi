@@ -67,16 +67,55 @@ public sealed class ReaperturasController(SqlConnectionFactory factory) : Contro
         return Ok(new { total=await resultado.ReadSingleAsync<int>(), filas=await resultado.ReadAsync() });
     }
 
-    [HttpPost("{folio}")]
-    public async Task<IActionResult> Reabrir(string folio)
+    private const string Impacto = """
+        SELECT f.id, CONCAT('EM-FIS-',YEAR(f.inicio),'-',f.id) folio, COALESCE(e.nombre,'Nacional') alcance
+        FROM fiscalia.entrega f LEFT JOIN catalogo.entidad e ON e.id=f.entidad
+        WHERE f.vigente=1 AND EXISTS (
+            SELECT 1 FROM fiscalia.respuesta s JOIN primer_respondiente.registro r ON r.id=s.registro
+            JOIN primer_respondiente.carga c ON c.id=r.id_carga
+            WHERE s.entrega=f.id AND c.folio=@folio AND c.vigente=1 AND c.estado='CONFIRMADA')
+        ORDER BY f.id
+        """;
+
+    public sealed record Afectada(long Id, string Folio, string Alcance);
+    public sealed record Autorizacion(long[]? Entregas);
+
+    [HttpGet("{folio}/impacto")]
+    public async Task<IActionResult> ConsultarImpacto(string folio)
     {
         await using var db = await factory.AbrirAsync();
-        await using var tx = await db.BeginTransactionAsync();
+        return Ok(await db.QueryAsync<Afectada>(Impacto, new { folio }));
+    }
+
+    [HttpPost("{folio}")]
+    public async Task<IActionResult> Reabrir(string folio, [FromBody] Autorizacion autorizacion)
+    {
+        await using var db = await factory.AbrirAsync();
+        await using var tx = await db.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         bool fiscalia = folio.StartsWith("EM-FIS-", StringComparison.Ordinal);
         var sql = fiscalia ? "UPDATE fiscalia.entrega SET reabierta=1 WHERE CONCAT('EM-FIS-',YEAR(inicio),'-',id)=@folio AND vigente=1 AND reabierta=0"
             : "UPDATE primer_respondiente.carga SET reabierta=1 WHERE folio=@folio AND estado='CONFIRMADA' AND vigente=1 AND reabierta=0";
-        if(await db.ExecuteAsync(sql,new { folio },tx)!=1) return Conflict(new { mensaje="La entrega ya fue reabierta o dejó de estar vigente. Actualice el listado." });
         var usuario = (UsuarioInfo)HttpContext.Items["Usuario"]!;
+        if(!fiscalia)
+        {
+            var periodo = await db.QuerySingleOrDefaultAsync<PeriodoInfo>("SELECT periodo_inicio Inicio, periodo_fin Fin FROM primer_respondiente.carga WHERE folio=@folio", new { folio }, tx);
+            if(periodo == null) return NotFound();
+            var bloqueo = await db.ExecuteScalarAsync<int>("""
+                DECLARE @r int;
+                EXEC @r=sys.sp_getapplock @Resource=@recurso,@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=15000;
+                SELECT @r;
+                """, new { recurso=$"EM-FISCALIA-{periodo.Inicio:yyyyMMdd}-{periodo.Fin:yyyyMMdd}" }, tx);
+            if(bloqueo < 0) return Conflict(new { mensaje="Hay una entrega en curso. Vuelva a revisar el impacto." });
+            var afectadas = (await db.QueryAsync<Afectada>(Impacto, new { folio }, tx)).ToList();
+            if(!afectadas.Select(f => f.Id).SequenceEqual((autorizacion.Entregas ?? []).Order()))
+                return Conflict(new { mensaje="Cambiaron las fiscalías afectadas. Abra nuevamente el detalle antes de autorizar." });
+            foreach(var f in afectadas)
+                await db.ExecuteAsync("""
+                    UPDATE fiscalia.entrega SET reabierta=1 WHERE id=@entrega;
+                    INSERT seguridad.reapertura(modulo,folio,usuario) VALUES('FISCALIA_ORIGEN',@folio,@usuarioId);
+                    """, new { entrega=f.Id, folio=f.Folio, usuarioId=usuario.Id }, tx);
+        }
+        if(await db.ExecuteAsync(sql,new { folio },tx)!=1) return Conflict(new { mensaje="La entrega ya fue reabierta o dejó de estar vigente. Actualice el listado." });
         await db.ExecuteAsync("INSERT seguridad.reapertura(modulo,folio,usuario) VALUES(@modulo,@folio,@Id)", new { modulo=fiscalia?"FISCALIA":"PRIMER_RESPONDIENTE", folio,usuario.Id },tx);
         await tx.CommitAsync();
         return NoContent();

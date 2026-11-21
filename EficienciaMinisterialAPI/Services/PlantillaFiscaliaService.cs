@@ -23,6 +23,39 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory, Cruce
         AND (@Nacional = 1 OR r.entidad = @Entidad)
         """;
 
+    // La otra fiscalía no puede absorber las filas reservadas para una recarga completa.
+    private const string Reservada = """
+        EXISTS (SELECT 1 FROM fiscalia.entrega f
+            JOIN seguridad.reapertura a ON a.modulo='FISCALIA_ORIGEN' AND a.folio=CONCAT('EM-FIS-',YEAR(f.inicio),'-',f.id)
+            WHERE f.vigente=1 AND f.reabierta=1 AND f.inicio=c.periodo_inicio AND f.fin=c.periodo_fin
+            AND ((@Nacional=1 AND f.entidad=r.entidad) OR
+                (@Nacional=0 AND f.entidad IS NULL AND EXISTS (
+                    SELECT 1 FROM fiscalia.respuesta s JOIN primer_respondiente.registro previo ON previo.id=s.registro
+                    JOIN primer_respondiente.carga origen ON origen.id=previo.id_carga
+                    WHERE s.entrega=f.id AND previo.entidad=r.entidad AND origen.institucion=c.institucion))))
+        """;
+
+    private static async Task<long> RevisionOrigenAsync(UsuarioInfo usuario, DateTime inicio, DateTime fin,
+        Microsoft.Data.SqlClient.SqlConnection db, System.Data.Common.DbTransaction tx)
+    {
+        using var datos = await db.QueryMultipleAsync("""
+            SELECT f.id INTO #recarga FROM fiscalia.entrega f
+            WHERE vigente=1 AND reabierta=1 AND inicio=@inicio AND fin=@fin
+            AND ((@Nacional=1 AND entidad IS NULL) OR (@Nacional=0 AND entidad=@Entidad));
+            SELECT TOP 1 c.folio FROM #recarga f JOIN fiscalia.respuesta s ON s.entrega=f.id
+            JOIN primer_respondiente.registro r ON r.id=s.registro JOIN primer_respondiente.carga c ON c.id=r.id_carga
+            WHERE c.vigente=1 AND c.reabierta=1;
+            SELECT COALESCE(MAX(a.id),0) FROM #recarga f JOIN seguridad.reapertura a
+            ON a.folio=CONCAT('EM-FIS-',YEAR(@inicio),'-',f.id) AND a.modulo='FISCALIA_ORIGEN';
+            DROP TABLE #recarga;
+            """, Alcance(usuario,inicio,fin), tx);
+        var pendiente = await datos.ReadFirstOrDefaultAsync<string>();
+        var revision = await datos.ReadSingleAsync<long>();
+        if(pendiente != null)
+            throw new ArgumentException($"Primer Respondiente debe confirmar la corrección de {pendiente}. Después descargue la plantilla y presente la entrega completa.");
+        return revision;
+    }
+
     private const string Atendido = """
         EXISTS (SELECT 1 FROM fiscalia.respuesta s JOIN fiscalia.entrega t ON t.id=s.entrega
                 WHERE s.registro=r.id AND t.vigente=1 AND t.reabierta=0)
@@ -35,34 +68,46 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory, Cruce
         var periodos = (await db.QueryAsync<PeriodoInfo>($"""
             SELECT DISTINCT c.periodo_inicio AS Inicio, c.periodo_fin AS Fin
             FROM primer_respondiente.carga c JOIN primer_respondiente.registro r ON r.id_carga = c.id
-            WHERE {Elegibles} AND NOT {Atendido} ORDER BY Inicio DESC;
+            WHERE {Elegibles} AND NOT {Reservada} AND NOT {Atendido} ORDER BY Inicio DESC;
             """, Alcance(usuario))).ToList();
         var entregas = (await db.QueryAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WHERE vigente=1 AND reabierta=0 AND ((@Nacional=1 AND entidad IS NULL) OR (@Nacional=0 AND entidad=@Entidad)) ORDER BY inicio DESC", Alcance(usuario))).ToList();
         var bloqueadas = await db.QueryAsync<PeriodoInfo>("SELECT inicio, fin FROM fiscalia.entrega WHERE vigente=1 AND reabierta=0 AND ((@Nacional=1 AND entidad IS NULL) OR (@Nacional=0 AND entidad=@Entidad))", Alcance(usuario));
         var confirmados = bloqueadas.Select(p => (p.Inicio, p.Fin)).ToHashSet();
         periodos.RemoveAll(p => confirmados.Contains((p.Inicio, p.Fin)));
-        return new { periodos, entregas };
+        var enCorreccion = (await db.QueryAsync<PeriodoInfo>("""
+            SELECT DISTINCT f.inicio, f.fin FROM fiscalia.entrega f
+            JOIN fiscalia.respuesta s ON s.entrega=f.id
+            JOIN primer_respondiente.registro r ON r.id=s.registro
+            JOIN primer_respondiente.carga c ON c.id=r.id_carga
+            WHERE f.vigente=1 AND f.reabierta=1 AND c.vigente=1 AND c.reabierta=1
+            AND ((@Nacional=1 AND f.entidad IS NULL) OR (@Nacional=0 AND f.entidad=@Entidad))
+            ORDER BY f.inicio DESC
+            """, Alcance(usuario))).ToList();
+        var pendientesOrigen = enCorreccion.Select(p => (p.Inicio,p.Fin)).ToHashSet();
+        periodos.RemoveAll(p => pendientesOrigen.Contains((p.Inicio,p.Fin)));
+        return new { periodos, entregas, enCorreccion };
     }
 
     public async Task<(byte[]? Archivo, int Total)> DescargarAsync(UsuarioInfo usuario, DateTime inicio, DateTime fin)
     {
-        var (filas, opciones) = await ObtenerDatosAsync(usuario, inicio, fin);
+        var (filas, opciones, revision) = await ObtenerDatosAsync(usuario, inicio, fin);
         filas.RemoveAll(f => f.Atendido);
         if(filas.Count == 0) return (null, 0);
-        var archivo = Crear(filas, opciones);
+        var archivo = Crear(filas, opciones, revision);
         await using var db = await factory.AbrirAsync();
         await db.ExecuteAsync("INSERT seguridad.bitacora(id_usuario, accion) VALUES(@id, 'DESCARGAR_PLANTILLA_FISCALIA');", new { id = usuario.Id });
         return (archivo, filas.Count);
     }
 
-    public async Task<(List<FilaInformePr> Filas, List<Opcion> Opciones)> ObtenerDatosAsync(UsuarioInfo usuario, DateTime inicio, DateTime fin)
+    public async Task<(List<FilaInformePr> Filas, List<Opcion> Opciones, long Revision)> ObtenerDatosAsync(UsuarioInfo usuario, DateTime inicio, DateTime fin)
     {
         if(!TieneAcceso(usuario)) throw new UnauthorizedAccessException();
         await using var db = await factory.AbrirAsync();
         await using var tx = await db.BeginTransactionAsync();
+        var revision = await RevisionOrigenAsync(usuario, inicio, fin, db, tx);
         var datos = await LeerAsync(usuario, inicio, fin, db, tx);
         await tx.CommitAsync();
-        return datos;
+        return (datos.Filas, datos.Opciones, revision);
     }
 
     private async Task<(List<FilaInformePr> Filas, List<Opcion> Opciones)> LeerAsync(UsuarioInfo usuario, DateTime inicio, DateTime fin,
@@ -77,7 +122,7 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory, Cruce
             FROM primer_respondiente.carga c JOIN primer_respondiente.registro r ON r.id_carga = c.id
             JOIN catalogo.institucion i ON i.codigo = c.institucion
             JOIN catalogo.entidad e ON e.id = r.entidad
-            WHERE {Elegibles} {(soloLocalizadas ? "AND r.estado_cruce='LOCALIZADO'" : "")} AND c.periodo_inicio = @inicio AND c.periodo_fin = @fin
+            WHERE {Elegibles} AND NOT {Reservada} {(soloLocalizadas ? "AND r.estado_cruce='LOCALIZADO'" : "")} AND c.periodo_inicio = @inicio AND c.periodo_fin = @fin
             ORDER BY c.institucion, r.entidad, c.folio, r.fila;
             """, Alcance(usuario, inicio, fin), transaction: tx, commandTimeout: 180)).ToList();
         var pendientes = filas.Where(f => f.EstadoCruce == "PENDIENTE").ToList();
@@ -158,15 +203,16 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory, Cruce
         }
         var previa = await db.QuerySingleOrDefaultAsync<Entrega>($"SELECT {CamposEntrega} FROM fiscalia.entrega WITH (UPDLOCK,HOLDLOCK) WHERE vigente=1 AND inicio=@inicio AND fin=@fin AND (entidad=@entidad OR (entidad IS NULL AND @entidad IS NULL))", parametros, tx);
         if(previa != null && !await db.ExecuteScalarAsync<bool>("SELECT reabierta FROM fiscalia.entrega WHERE id=@Id", previa, tx)) return (null, null);
+        var origen = await RevisionOrigenAsync(usuario, inicio, fin, db, tx);
         var (filas, opciones) = await LeerAsync(usuario, inicio, fin, db, tx);
-        var revision = ValidacionFiscalia.Revisar(libro, filas, opciones);
+        var revision = ValidacionFiscalia.Revisar(libro, filas, opciones, origen);
         if(filas.Count == 0 || revision.Errores.Count != 0) return (null, revision);
         var json = System.Text.Json.JsonSerializer.Serialize(revision.Respuestas);
         var huella = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json));
         if(previa != null)
         {
             var anterior = await db.QuerySingleAsync<byte[]>("SELECT huella FROM fiscalia.entrega WHERE id=@Id", previa, tx);
-            if(anterior.SequenceEqual(huella))
+            if(origen == 0 && anterior.SequenceEqual(huella))
             {
                 revision.Errores.Add(new(null, "Entrega", "Las respuestas son idénticas a la entrega vigente. Cargue la corrección."));
                 return (null, revision);
@@ -201,9 +247,10 @@ public sealed class PlantillaFiscaliaService(SqlConnectionFactory factory, Cruce
     internal static readonly int[] Binarias = [11, 12, 14, 15, 17, 19, 21, 22, 23];
     internal static readonly (string Grupo, int Columna)[] Grupos = [("MOTIVOS_LIBERTAD", 13), ("DETENCION_ILEGAL", 16), ("MOTIVO_NO_VINCULACION", 18), ("MEDIDA_CAUTELAR", 20), ("DESCRIPCION_CONCLUSION", 24)];
 
-    public static byte[] Crear(IReadOnlyList<FilaInformePr> filas, IReadOnlyList<Opcion> opciones)
+    public static byte[] Crear(IReadOnlyList<FilaInformePr> filas, IReadOnlyList<Opcion> opciones, long revision = 0)
     {
         using var libro = new XLWorkbook();
+        if(revision > 0) libro.Properties.Keywords = $"EM-FISCALIA-{revision}";
         var hoja = libro.AddWorksheet("Seguimiento");
         hoja.Range(1, 1, 1, Origen.Length).Merge().Value = "DATOS REPORTADOS POR PRIMER RESPONDIENTE";
         hoja.Range(1, Origen.Length + 1, 1, Origen.Length + Respuesta.Length).Merge().Value = "SEGUIMIENTO DE FISCALÍA — CAMPOS PARA LLENAR";

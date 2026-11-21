@@ -11,6 +11,22 @@ void Probar(string nombre, Action accion)
     catch(Exception e) { fallos++; Console.WriteLine("ERROR " + nombre + ": " + e.Message); }
 }
 void Ver(bool valor, string mensaje) { if(!valor) throw new Exception(mensaje); }
+Probar("Corrección de origen exige la plantilla nueva completa", () =>
+{
+    var inicio = new DateTime(2026, 10, 1);
+    var filas = new List<FilaInformePr> {
+        new() { IdRegistro=1, FolioEntrega="EM-PR-1", PeriodoInicio=inicio, PeriodoFin=inicio.AddDays(14), FechaDetencion=inicio },
+        new() { IdRegistro=2, FolioEntrega="EM-PR-2", PeriodoInicio=inicio, PeriodoFin=inicio.AddDays(14), FechaDetencion=inicio }
+    };
+    using var libro = new XLWorkbook(new MemoryStream(PlantillaFiscaliaService.Crear(filas, [], 12)));
+    var hoja = libro.Worksheet("Seguimiento");
+    hoja.Cell(3,11).Value = "No";
+    hoja.Cell(4,11).Value = "No";
+    Ver(ValidacionFiscalia.Revisar(libro, filas, [], 13).Errores.Any(e => e.Campo=="Plantilla"), "Aceptó una descarga anterior.");
+    Ver(ValidacionFiscalia.Revisar(libro, filas, [], 12).Errores.Count==0, "Rechazó la plantilla vigente completa.");
+    hoja.Row(4).Delete();
+    Ver(ValidacionFiscalia.Revisar(libro, filas, [], 12).Errores.Any(e => e.Campo=="Precarga"), "Aceptó una recarga parcial.");
+});
 Probar("Primer login obligatorio excepto cuentas con acceso de superusuario", () =>
 {
     var cuenta = new UsuarioInfo { CambioPasswordPendiente = true, Accesos = [new() { Rol = "CONSULTA" }] };
